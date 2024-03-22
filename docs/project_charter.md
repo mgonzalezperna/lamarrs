@@ -14,7 +14,7 @@ The objective of this project is to develop a foundational prototype of a centra
 
 ## Project Scope:
 The scope of the project includes:
-- Document the prototype's proposed architecture for future reference and development. Ensure portability.
+- Document the prototype's proposed architecture for future reference and development.
 - Design and develop a foundational prototype of the backbone of the control system.
 - Create and implement the most basic client system to operate on the targeted mobile devices.
 - Implement three example features for controlling mobile devices: synchronization, lighting effects, and some audiovisual enhancement.
