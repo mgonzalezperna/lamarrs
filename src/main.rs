@@ -1,16 +1,19 @@
 use std::{
     collections::HashMap,
     env,
-    io::Error as IoError,
+    fmt::Display,
     net::SocketAddr,
     sync::{Arc, Mutex},
 };
 
 use futures_channel::mpsc::{unbounded, UnboundedSender};
 use futures_util::{future, pin_mut, stream::TryStreamExt, StreamExt};
-
+use inquire::{InquireError, Select};
+use strum::IntoEnumIterator;
+use strum_macros::EnumIter;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio_tungstenite::tungstenite::protocol::Message;
+use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 
 type Tx = UnboundedSender<Message>;
 type PeerMap = Arc<Mutex<HashMap<SocketAddr, Tx>>>;
