@@ -115,3 +115,36 @@ async fn read_stdin(tx: futures_channel::mpsc::UnboundedSender<Message>) {
         tx.unbounded_send(Message::binary(buf)).unwrap();
     }
 }
+
+#[derive(Debug, EnumIter)]
+enum Option {
+    Server,
+    Client,
+}
+
+impl Display for Option {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let state = match self {
+            Option::Server => "Server",
+            Option::Client => "Client",
+        };
+        write!(f, "{}", state)
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    let options: Vec<_> = Option::iter().collect();
+    let addr = env::args()
+        .nth(1)
+        .unwrap_or_else(|| "localhost:8080".to_string());
+
+    let ans: Result<Option, InquireError> =
+        Select::new("What's your favorite fruit?", options).prompt();
+
+    match ans {
+        Ok(Option::Server) => spawn_sever(addr).await,
+        Ok(Option::Client) => spawn_client("ws://".to_string() + &addr).await,
+        Err(_) => panic!("Error has ocurred."),
+    }
+}
