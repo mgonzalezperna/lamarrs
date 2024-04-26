@@ -32,38 +32,40 @@ async fn handle_connection(peer_map: PeerMap, raw_stream: TcpStream, addr: Socke
 
     let (outgoing, incoming) = ws_stream.split();
 
-    let broadcast_incoming = incoming.try_for_each(|msg| {
+    let messages_incoming = incoming.try_for_each(|msg| {
         println!(
             "Received a message from {}: {}",
             addr,
             msg.to_text().unwrap()
         );
-        let peers = peer_map.lock().unwrap();
-
-        // We want to broadcast the message to everyone except ourselves.
-        let broadcast_recipients = peers
-            .iter()
-            .filter(|(peer_addr, _)| peer_addr != &&addr)
-            .map(|(_, ws_sink)| ws_sink);
-
-        for recp in broadcast_recipients {
-            recp.unbounded_send(msg.clone()).unwrap();
-        }
-
         future::ok(())
     });
 
     let receive_from_others = rx.map(Ok).forward(outgoing);
 
-    pin_mut!(broadcast_incoming, receive_from_others);
-    future::select(broadcast_incoming, receive_from_others).await;
+    pin_mut!(messages_incoming, receive_from_others);
+    future::select(messages_incoming, receive_from_others).await;
 
     println!("{} disconnected", &addr);
-    peer_map.lock().unwrap().remove(&addr);
+    peer_map.clone().lock().unwrap().remove(&addr);
+}
+
+async fn write_to_peers(peer_map: PeerMap) {
+    loop {
+        let stdin = read_stdin().await;
+        let message = Message::Text(String::from_utf8(stdin.clone()).unwrap());
+        let peers = peer_map.lock().unwrap();
+        let broadcast_recipients = peers
+            .iter()
+            .map(|(_, ws_sink)| ws_sink);
+        for recp in broadcast_recipients {
+            recp.unbounded_send(message.clone()).unwrap();
+        };
+    };
 }
 
 async fn spawn_sever(addr: String) {
-    let state = PeerMap::new(Mutex::new(HashMap::new()));
+    let state=PeerMap::new(Mutex::new(HashMap::new()));
 
     // Create the event loop and TCP listener we'll accept connections on.
     let try_socket = TcpListener::bind(&addr).await;
@@ -73,6 +75,7 @@ async fn spawn_sever(addr: String) {
     // Let's spawn the handling of each connection in a separate task.
     while let Ok((stream, addr)) = listener.accept().await {
         tokio::spawn(handle_connection(state.clone(), stream, addr));
+        tokio::spawn(write_to_peers(state.clone()));
     }
 }
 
@@ -80,10 +83,12 @@ async fn spawn_client(connect_addr: String) {
     let url = url::Url::parse(&connect_addr).expect("Problem parsing the URL.");
 
     let (stdin_tx, stdin_rx) = futures_channel::mpsc::unbounded();
-    tokio::spawn(read_stdin(stdin_tx));
-
-    dbg!(&url);
-
+    tokio::spawn(async move{
+        loop {
+            let stdin = read_stdin().await;
+            stdin_tx.unbounded_send(Message::binary(stdin)).unwrap();
+        };
+    });
     let (ws_stream, _) = connect_async(url).await.expect("Failed to connect");
     println!("WebSocket handshake has been successfully completed");
 
@@ -103,17 +108,15 @@ async fn spawn_client(connect_addr: String) {
 
 // Our helper method which will read data from stdin and send it along the
 // sender provided.
-async fn read_stdin(tx: futures_channel::mpsc::UnboundedSender<Message>) {
+async fn read_stdin() -> Vec<u8> {
     let mut stdin = tokio::io::stdin();
-    loop {
-        let mut buf = vec![0; 1024];
-        let n = match stdin.read(&mut buf).await {
-            Err(_) | Ok(0) => break,
-            Ok(n) => n,
-        };
-        buf.truncate(n);
-        tx.unbounded_send(Message::binary(buf)).unwrap();
-    }
+    let mut buf = vec![0; 1024];
+    let n = match stdin.read(&mut buf).await {
+        Err(_) | Ok(0) => panic!(),
+        Ok(n) => n,
+    };
+    buf.truncate(n);
+    buf
 }
 
 #[derive(Debug, EnumIter)]
