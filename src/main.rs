@@ -89,7 +89,6 @@ async fn spawn_client(connect_addr: String) {
             stdin_tx.unbounded_send(Message::binary(stdin)).unwrap();
         };
     });
-
     let (ws_stream, _) = connect_async(url).await.expect("Failed to connect");
     println!("WebSocket handshake has been successfully completed");
 
