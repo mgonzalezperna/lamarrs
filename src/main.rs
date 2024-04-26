@@ -80,9 +80,12 @@ async fn spawn_client(connect_addr: String) {
     let url = url::Url::parse(&connect_addr).expect("Problem parsing the URL.");
 
     let (stdin_tx, stdin_rx) = futures_channel::mpsc::unbounded();
-    tokio::spawn(read_stdin(stdin_tx));
-
-    dbg!(&url);
+    tokio::spawn(async move{
+        loop {
+            let stdin = read_stdin().await;
+            stdin_tx.unbounded_send(Message::binary(stdin)).unwrap();
+        };
+    });
 
     let (ws_stream, _) = connect_async(url).await.expect("Failed to connect");
     println!("WebSocket handshake has been successfully completed");
