@@ -19,28 +19,80 @@ The best summarized graph explaining the basic architecture can be found next.
 ```mermaid
 graph LR
     Orchestrator --MQTT_Broker--> Gateway
-    Gateway --TLS Websocket--> Suscriber1
-    Gateway --TLS Websocket--> Suscriber2
-    Gateway --TLS Websocket--> Suscriber3
-    Gateway --TLS Websocket--> Suscriber4
+    Gateway --TLS Websocket--> Subscriber1
+    Gateway --TLS Websocket--> Subscriber2
+    Gateway --TLS Websocket--> Subscriber3
+    Gateway --TLS Websocket--> Subscriber4
 
     subgraph "Clients Marked 1"
         subgraph "Client 1"
-            Suscriber1--local_MQTT_Broker --> Frontend_Client1
+            Subscriber1--local_MQTT_Broker --> Frontend_Client1
         end
         subgraph "Client 2"
-            Suscriber2--local_MQTT_Broker --> Special_Hardware_Client2
+            Subscriber2--local_MQTT_Broker --> Special_Hardware_Client2
         end
     end
     subgraph "Clients Marked 2"
         subgraph "Client 3"
-            Suscriber3-- local_MQTT_Broker --> Frontend_Client3
+            Subscriber3-- local_MQTT_Broker --> Frontend_Client3
         end
     end
     subgraph "Client 4"
-        Suscriber4-- local_MQTT_Broker --> Special_Hardware_Client4
+        Subscriber4-- local_MQTT_Broker --> Special_Hardware_Client4
     end
 ```
+
+## 2.1 Gateway (Server) Architecture
+
+The Gateway Component of the original prototype became highly complex due to the implications of a design using shared states protected by a Mutex. This decision results in significant coupling with the introduction of specific asynchronous services for broadcasting various messages. Consequently, a complete redesign of the component is necessary using Actors.
+
+Actors are MPSC (Multiple Producer - Single Consumer) components that expose queues (channels) for communication with the rest of the system, while running in eternal asynchronous loops—except for errors or application shutdowns. The loop is defined in their `run` function. This framework provides greater flexibility in microservice architecture with local states for each component, greatly simplifying scalability, maintainability, and traceability.
+
+```mermaid
+graph TB
+    Orchestrator
+    Subscriber
+    
+    subgraph "Gateway"
+        subgraph OrchestratorInterface
+            all_actors["Actors 1..n handlers list"]
+        end
+        WebsocketFactory
+        subgraph Actor
+            actor_inbox["inbox"]
+            actor_handler["handler"]
+            list["list of Subscribed handlers"]
+            broadcaster
+        end
+        actor1n --collection of-----> Actor
+        subgraph "Main module"
+            actor1n
+            WebsocketFactory
+        end
+        WebsocketFactory --builds--> SubscriberInterface
+    end
+    subgraph "SubscriberInterface"
+        inbound["Split Stream"]
+        outbound["Split Sink"]
+        subs_inbox["inbox"]
+        subs_handler["handler"]
+        actor_handler1n["Actors 1..n handlers list"]
+    end
+    Subscriber --message--> inbound
+    inbound --relays to actor[x]--> actor_handler1n
+    actor_handler1n --message--> actor_inbox
+    actor_inbox --suscribes handler--> list
+    Orchestrator --broadcasteable message-->OrchestratorInterface
+    OrchestratorInterface --targeted broadcasteable message--> actor_inbox
+    actor_inbox --relays message to broadcast-->broadcaster
+    broadcaster --broadcast message-->subs_inbox
+    list --provides handlers to broadcast to o-->broadcaster
+    subs_inbox --message-->outbound
+```
+
+## 2.1 Subscriber (Client) Architecture
+
+On the Subscriber side, the general architecture is yet TBD.
 
 ## 3. Architectural Goals and Constraints
 
