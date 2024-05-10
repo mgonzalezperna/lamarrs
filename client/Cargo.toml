@@ -1,0 +1,19 @@
+[package]
+name = "lamarrs-client"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+futures-channel = "0.3.30"
+futures-util = "0.3.30"
+inquire = "0.7.5"
+strum = "0.26.2"
+strum_macros = "0.26.2"
+thiserror = "1.0.59"
+tokio = { version="1.37.0", features = ["full"] }
+tokio-tungstenite = { version = "0.21.0", features=["native-tls"] }
+tungstenite = "0.21.0"
+url = "2.5.0"
+lamarrs-utils = { path = "../lamarrs-utils" }
