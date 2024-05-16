@@ -66,23 +66,30 @@ async fn spawn_client_connection(
     let (tx, mut rx) = channel(32);
 
     let (mut outgoing, mut incoming) = ws_stream.split();
-
-    tokio::select!(
-        message = incoming.next() => {
-            if let Some(message) = message {
-                println!(
-                    "Received a message from {}: {}",
-                    addr,
-                    message.unwrap().to_text().unwrap()
-                );
+    loop {
+        tokio::select!(
+            message = incoming.next() => {
+                if let Some(message) = message {
+                    let result = message.unwrap();
+                    println!(
+                        "Received a message from {}: {}",
+                        addr,
+                        result.to_text().unwrap()
+                    );
+                    // This is a horrible patch to allow clients to disconnect, it will be solved after implementing the Messages enum.
+                    if result.to_text().unwrap() == "disconnect\n" {
+                        println!("Client wants to disconnect");
+                        break
+                    }
+                }
             }
-        }
-        message = rx.recv() => {
-            if let Some(message) = message {
-                let _ = outgoing.send(message).await;
+            message = rx.recv() => {
+                if let Some(message) = message {
+                    let _ = outgoing.send(message).await;
+                }
             }
-        }
-    );
+        )
+    };
     println!("{} disconnected", &addr);
     Ok(())
 }
