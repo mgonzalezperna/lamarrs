@@ -89,7 +89,7 @@ async fn spawn_client_connection(
                 }
             }
         )
-    };
+    }
     println!("{} disconnected", &addr);
     Ok(())
 }

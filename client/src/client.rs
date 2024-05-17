@@ -8,7 +8,6 @@ pub enum ClientError {
     ParseError(#[from] url::ParseError),
     #[error("Connection could't not be stablished with the server.")]
     Error(#[from] tungstenite::error::Error),
-    
 }
 
 pub async fn spawn(connect_addr: String) -> Result<(), ClientError> {
