@@ -26,41 +26,16 @@ pub async fn read_stdin() -> Vec<u8> {
     buf
 }
 
-pub async fn handle_connection(peer_map: PeerMap, raw_stream: TcpStream, addr: SocketAddr) {
-    println!("Incoming TCP connection from: {}", addr);
-
-    let ws_stream = tokio_tungstenite::accept_async(raw_stream)
-        .await
-        .expect("Error during the websocket handshake occurred");
-    println!("WebSocket connection established: {}", addr);
-
-    // Insert the write part of this peer to the peer map.
-    let (tx, rx) = unbounded();
-    peer_map.lock().unwrap().insert(addr, tx);
-
-    let (outgoing, incoming) = ws_stream.split();
-
-    let messages_incoming = incoming.try_for_each(|msg| {
-        println!(
-            "Received a message from {}: {}",
-            addr,
-            msg.to_text().unwrap()
-        );
-        future::ok(())
-    });
-
-    let receive_from_others = rx.map(Ok).forward(outgoing);
-
-    pin_mut!(messages_incoming, receive_from_others);
-    future::select(messages_incoming, receive_from_others).await;
-
-    println!("{} disconnected", &addr);
-    peer_map.clone().lock().unwrap().remove(&addr);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct FakeClient {
+        // Receiver from websocket connection
+        read: mpsc::Receiver<ServerResponse>,
+        // Sender to websocket connection
+        write: mpsc::Sender<ServerMessage>,
+    }
 
     #[test]
     fn it_works() {
