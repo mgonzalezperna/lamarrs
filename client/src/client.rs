@@ -1,6 +1,11 @@
-use futures_util::{future, pin_mut, StreamExt};
+use futures_util::{SinkExt, StreamExt};
 use tokio::io::AsyncWriteExt;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
+use tokio::sync::mpsc::{channel, Sender};
+use lamarrs_utils::enums::SubscriberMessage;
+use lamarrs_utils::messages::Subscribe;
+use arrayvec::ArrayString;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
@@ -13,27 +18,36 @@ pub enum ClientError {
 pub async fn spawn(connect_addr: String) -> Result<(), ClientError> {
     let url = url::Url::parse(&connect_addr)?;
 
-    let (stdin_tx, stdin_rx) = futures_channel::mpsc::unbounded();
+    let (mut stdin_tx, mut stdin_rx) = channel(32);
     tokio::spawn(async move {
         loop {
             let stdin = lamarrs_utils::read_stdin().await;
-            stdin_tx.unbounded_send(Message::binary(stdin)).unwrap();
+            let msg = SubscriberMessage::Subscribe(Subscribe{service: ArrayString::from(std::str::from_utf8(&stdin).unwrap()).unwrap()});
+            dbg!(&msg);
+            stdin_tx.send(msg).await;
+            //stdin_tx.unbounded_send(Message::binary(stdin)).unwrap();
         }
     });
     let (ws_stream, _) = connect_async(url).await?;
     println!("WebSocket handshake has been successfully completed");
 
-    let (write, read) = ws_stream.split();
+    let (mut write, mut read) = ws_stream.split();
 
-    let stdin_to_ws = stdin_rx.map(Ok).forward(write);
-    let ws_to_stdout = {
-        read.for_each(|message| async {
-            let data = message.unwrap().into_data();
-            tokio::io::stdout().write_all(&data).await.unwrap();
-        })
-    };
-
-    pin_mut!(stdin_to_ws, ws_to_stdout);
-    future::select(stdin_to_ws, ws_to_stdout).await;
+    loop {
+        tokio::select!(
+            msg = read.next() => {
+                if let Some(Ok(msg)) = msg {
+                    let data = msg.into_data();
+                    tokio::io::stdout().write_all(&data).await.unwrap();
+            }}
+            msg = stdin_rx.recv() => {
+                if let Some(msg) = msg {
+                    let item = tungstenite::Message::Text(serde_json::to_string(&msg).unwrap());
+                    dbg!(&item);
+                    let _ = write.send(item).await;
+                }
+            }
+        );
+    }
     Ok(())
 }
