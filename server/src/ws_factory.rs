@@ -1,10 +1,11 @@
 use futures_util::{SinkExt, StreamExt};
+use lamarrs_utils::enums::GatewayMessage;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
 use tokio::{
     io,
-    sync::mpsc::{channel, Receiver, Sender},
+    sync::mpsc::{channel, Sender},
 };
 use tungstenite::Message;
 
@@ -17,20 +18,15 @@ pub enum ConnManagerError {
 }
 
 pub struct WebSocketFactory {
-    text: Sender<Message>,
-    color: Sender<Message>,
-    pub sender: Sender<Message>,
-    receiver: Receiver<Message>,
+    text: Sender<GatewayMessage>,
+    color: Sender<GatewayMessage>,
 }
 
 impl WebSocketFactory {
-    pub fn new(text: Sender<Message>, color: Sender<Message>) -> Self {
-        let (sender, receiver) = channel(32);
+    pub fn new(text: Sender<GatewayMessage>, color: Sender<GatewayMessage>) -> Self {
         Self {
             text,
             color,
-            sender,
-            receiver,
         }
     }
 
@@ -53,8 +49,8 @@ impl WebSocketFactory {
 
 async fn spawn_client_connection(
     stream: TcpStream,
-    text: Sender<Message>,
-    color: Sender<Message>,
+    text: Sender<GatewayMessage>,
+    color: Sender<GatewayMessage>,
     addr: SocketAddr,
 ) -> Result<(), ConnManagerError> {
     println!("Incoming TCP connection from: {}", addr);
@@ -62,25 +58,35 @@ async fn spawn_client_connection(
     let ws_stream = tokio_tungstenite::accept_async(stream).await?;
     println!("WebSocket connection established: {}", addr);
 
-    // Insert the write part of this peer to the peer map.
     let (tx, mut rx) = channel(32);
 
     let (mut outgoing, mut incoming) = ws_stream.split();
     loop {
         tokio::select!(
             message = incoming.next() => {
-                if let Some(message) = message {
-                    let result = message.unwrap();
-                    println!(
-                        "Received a message from {}: {}",
-                        addr,
-                        result.to_text().unwrap()
-                    );
-                    // This is a horrible patch to allow clients to disconnect, it will be solved after implementing the Messages enum.
-                    if result.to_text().unwrap() == "disconnect\n" {
-                        println!("Client wants to disconnect");
-                        break
-                    }
+                //dbg!(&message);
+                match message {
+                    Some(Ok(message)) => {
+                        println!(
+                            "Received a message from {}: {}",
+                            addr,
+                            &message.to_text().unwrap() 
+                        );
+                        let subscriber_message = match message {
+                            Message::Text(data) => serde_json::to_value(data).unwrap(),
+                            Message::Close(_) => {
+                                println!("Client wants to disconnect");
+                                break
+                            },
+                            _ => panic!("Unrecognized message")
+                        };
+                    },
+                    Some(Err(error)) => panic!("Error! {}", error),
+                    None => {
+                        outgoing.close().await;
+                        break;
+                    },
+                    _ => println!("Unknown incoming message")
                 }
             }
             message = rx.recv() => {
@@ -92,4 +98,15 @@ async fn spawn_client_connection(
     }
     println!("{} disconnected", &addr);
     Ok(())
+}
+
+#[cfg(test)]
+pub mod test {
+    use crate::test::FakeClient;
+
+   // pub async fn create_ws_for_new_client() {
+   //     let mut fake_client: FakeClient = FakeClient::new("localhost".to_string());
+   //     let result = 4;
+   //     assert_eq!(result, 4);
+   // }
 }
