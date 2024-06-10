@@ -16,4 +16,3 @@ pub async fn read_stdin() -> Vec<u8> {
     buf.truncate(n);
     buf
 }
-
