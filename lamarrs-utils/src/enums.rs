@@ -129,3 +129,38 @@ impl std::fmt::Display for CloseConnectionReason{
         write!(f, "{}", value)
     }
 }
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub enum Service{
+    Subtitle,
+}
+
+impl std::fmt::Display for Service{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let value = match self {
+            Self::Subtitle=> "Subtitle",
+        };
+        write!(f, "{}", value)
+    }
+}
+
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub enum Color{
+    Red,
+    Blue,
+    White,
+    Black,
+}
+
+impl std::fmt::Display for Color{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let value = match self {
+            Self::Red=> "Red",
+            Self::Blue=> "Blue",
+            Self::White=> "White",
+            Self::Black=> "Black",
+        };
+        write!(f, "{}", value)
+    }
+}
