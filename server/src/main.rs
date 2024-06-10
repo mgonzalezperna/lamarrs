@@ -1,10 +1,13 @@
 use std::env;
 use std::io;
 mod services;
+mod subscriber;
+mod test;
 mod ws_factory;
 
-use crate::services::Text;
-use crate::ws_factory::WebSocketFactory;
+use crate::services::text_streamers::SubtitlesStreamer;
+use crate::ws_factory::SubscriberBuilder;
+use services::text_streamers::ColorStreamer;
 use tokio::net::TcpListener;
 
 #[derive(Debug, thiserror::Error)]
@@ -28,11 +31,14 @@ async fn main() -> Result<(), ServerError> {
     let try_socket = TcpListener::bind(&addr).await;
     let listener = try_socket?;
     println!("Listening on: {}", addr);
-    let mut text_service = Text::new();
-    let ws_factory =
-        WebSocketFactory::new(text_service.sender.clone(), text_service.sender.clone());
+    let mut subtitle_service = SubtitlesStreamer::new();
+    let mut color_service = ColorStreamer::new();
+    let ws_factory = SubscriberBuilder::new(
+        subtitle_service.sender.clone(),
+        color_service.sender.clone(),
+    );
     tokio::select! {
-        _ = text_service.run() => {
+        _ = subtitle_service.run() => {
             Err(ServerError::TextServiceError)
         }
         _ = ws_factory.run(listener) => {
