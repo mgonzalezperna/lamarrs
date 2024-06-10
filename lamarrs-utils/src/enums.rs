@@ -115,7 +115,7 @@ pub enum RegisterResult{
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum CloseConnectionReason{
     SubscriberRequest,
-    GatewatRequest,
+    GatewayRequest,
     Unexpected
 }
 
@@ -123,7 +123,7 @@ impl std::fmt::Display for CloseConnectionReason{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let value = match self {
             Self::SubscriberRequest=> "Subscriber Request",
-            Self::GatewatRequest=> "Gatewat Request",
+            Self::GatewayRequest=> "Gateway Request",
             Self::Unexpected=> "Unexpected",
         };
         write!(f, "{}", value)
@@ -133,12 +133,14 @@ impl std::fmt::Display for CloseConnectionReason{
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum Service{
     Subtitle,
+    Color,
 }
 
 impl std::fmt::Display for Service{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let value = match self {
             Self::Subtitle=> "Subtitle",
+            Self::Color=> "Color",
         };
         write!(f, "{}", value)
     }
