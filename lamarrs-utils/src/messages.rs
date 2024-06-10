@@ -1,23 +1,16 @@
+// Collection of messages types to be send via websockets.
+
 use serde::{Deserialize, Serialize};
-use crate::enums::RelativeLocation;
+use crate::enums::{RelativeLocation, Service};
 use arrayvec::ArrayString;
+use uuid::Uuid;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SubscribeResult {
-    pub result: ArrayString<20>,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Subscribe {
-    pub service: ArrayString<20>,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Location {
-    pub location: RelativeLocation,
+pub struct Suscribe{
+    pub uuid: Uuid,
+    pub service: Service,
+    pub location: RelativeLocation
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -25,4 +18,3 @@ pub struct Location {
 pub struct Subtitle{
     pub subtitle: ArrayString<35>,
 }
-
