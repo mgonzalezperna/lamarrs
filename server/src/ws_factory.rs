@@ -25,9 +25,12 @@ impl SubscriberBuilder {
         loop {
             match listener.accept().await {
                 Ok((stream, addr)) => {
-                    let mut new_subscriber =
-                        Subscriber::new(self.subtitle.clone(), self.color.clone(), addr);
-                    new_subscriber.run(stream).await;
+                    tokio::spawn({
+                        let mut new_subscriber =Subscriber::new(self.subtitle.clone(), self.color.clone(), addr);
+                        async move {
+                            new_subscriber.run(stream).await;
+                        }
+                    });
                 }
                 Err(error) => {
                     // Retry reconnect in 10 seconds
