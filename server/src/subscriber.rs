@@ -234,6 +234,16 @@ impl Subscriber {
                                 .await
                                 .unwrap();
                         }
+                        Service::Color => {
+                            self.color
+                                .send(ColorMessage::Subscribe(SusbcriptionData {
+                                    sender_id: self.id.uuid.unwrap(),
+                                    sender: self.sender.clone(),
+                                    location: self.id.location.clone().unwrap(),
+                                }))
+                                .await
+                                .unwrap();
+                        }
                     }
                 }
                 Err(_) => todo!(),
