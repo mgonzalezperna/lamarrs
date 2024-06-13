@@ -2,16 +2,16 @@ pub mod fake_subscriber;
 use std::{thread, time::Duration};
 
 use crate::{
-    services::text_streamers::{ColorStreamer, SubtitlesStreamer},
+    services::{payload, text_streamers::{ColorMessage, ColorStreamer, SubtitlesStreamer}},
     ws_factory::SubscriberBuilder,
     ServerError,
 };
 use fake_subscriber::FakeSubscriber;
+use futures_util::future::join_all;
 use lamarrs_utils::enums::{
-    GatewayError, GatewayMessage, RegisterResult, RelativeLocation, Service, SubscribeResult,
-    SubscriberMessage,
+    Color, GatewayError, GatewayMessage, RegisterResult, RelativeLocation, Service, SubscribeResult, SubscriberMessage
 };
-use tokio::{net::TcpListener, time::sleep};
+use tokio::{net::TcpListener, sync::mpsc::error::TryRecvError};
 use tracing::{debug, error, info, instrument, trace, warn};
 use url::Url;
 
@@ -45,6 +45,9 @@ async fn start_app(
     );
     tokio::select! {
         _ = subtitle_service.run() => {
+            Err(ServerError::TextServiceError)
+        }
+        _ = color_service.run() => {
             Err(ServerError::TextServiceError)
         }
         _ = ws_factory.run(listener) => {
