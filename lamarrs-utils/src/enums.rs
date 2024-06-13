@@ -133,14 +133,14 @@ impl std::fmt::Display for CloseConnectionReason{
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum Service{
     Subtitle,
-    Color,
+    Color
 }
 
 impl std::fmt::Display for Service{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let value = match self {
             Self::Subtitle=> "Subtitle",
-            Self::Color=> "Color",
+            Self::Color=> "Color"
         };
         write!(f, "{}", value)
     }
