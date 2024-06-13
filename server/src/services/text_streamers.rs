@@ -26,6 +26,7 @@ pub enum SubtitleMessage {
 /// Messages [`ColorStreamer`] operates on.
 #[derive(Debug)]
 pub enum ColorMessage {
+    Subscribe(SusbcriptionData),
     UpdateSubscription(SusbcriptionData),
     SendColor(SendColor),
 }
@@ -156,15 +157,42 @@ impl ColorStreamer {
         sender: Sender<GatewayMessage>,
         location: RelativeLocation,
     ) {
-        self.targets
-            .entry(sender_id)
-            .and_modify(|value| *value = (sender.clone(), location.clone()))
-            .or_insert((sender, location));
+        debug!(?sender_id, "Processing subscription request");
+        let subscribe_result = match self.targets.entry(sender_id) {
+            hash_map::Entry::Occupied(_) => SubscribeResult::AlreadySubscribed,
+            hash_map::Entry::Vacant(_) => {
+                self.targets
+                    .insert(sender_id, (sender.clone(), location.clone()));
+                SubscribeResult::Success
+            }
+        };
+        sender
+            .send(GatewayMessage::SubscribeResult(subscribe_result))
+            .await;
     }
 
-    pub async fn send(&mut self, message: Color, target_location: RelativeLocation) {
+    pub async fn update_subscription(
+        &mut self,
+        sender_id: Uuid,
+        sender: Sender<GatewayMessage>,
+        location: RelativeLocation,
+    ) {
+        let update_result = match self.targets.entry(sender_id) {
+            hash_map::Entry::Occupied(mut occupied_entry) => {
+                let entry = occupied_entry.get_mut();
+                *entry = (sender.clone(), location.clone());
+                SubscribeResult::UpdatedSubscription
+            }
+            hash_map::Entry::Vacant(_) => SubscribeResult::NotSubscribed,
+        };
+        sender
+            .send(GatewayMessage::SubscribeResult(update_result))
+            .await;
+    }
+
+    pub async fn send(&mut self, color: Color, target_location: RelativeLocation) {
         for sender in self.get_senders_by_location(target_location) {
-            sender.send(GatewayMessage::Color(message.clone())).await;
+            sender.send(GatewayMessage::Color(color.clone())).await;
         }
     }
 
@@ -188,7 +216,12 @@ impl ColorStreamer {
     pub async fn run(&mut self) -> Result<(), TextStreamerError> {
         loop {
             while let Some(message) = self.receiver.recv().await {
+                debug!("Processing new message");
                 match message {
+                    ColorMessage::Subscribe(details) => {
+                        self.subscribe(details.sender_id, details.sender, details.location)
+                            .await
+                    }
                     ColorMessage::UpdateSubscription(details) => {
                         self.subscribe(details.sender_id, details.sender, details.location)
                             .await
@@ -196,9 +229,9 @@ impl ColorStreamer {
                     ColorMessage::SendColor(color) => {
                         self.send(color.color, color.target_location).await
                     }
-                    _ => panic!("Unsupported message type received"),
                 }
             }
         }
+        panic!("Unsupported message type received")
     }
 }

@@ -2,9 +2,10 @@ use futures_util::{SinkExt, StreamExt};
 use lamarrs_utils::enums::{self, GatewayMessage, RelativeLocation, SubscriberMessage};
 use tokio::{
     io,
-    sync::mpsc::{self, error::SendError},
+    sync::mpsc::{self, error::{SendError, TryRecvError}},
 };
-use tungstenite::Message;
+use tracing::{debug, field::debug};
+use tungstenite::{http::response, Message};
 use url::Url;
 use uuid::Uuid;
 
@@ -19,7 +20,7 @@ pub enum FakeSubscriberError {
 #[derive(Debug)]
 pub struct FakeSubscriber {
     // WS server URL
-    location: RelativeLocation,
+    pub location: RelativeLocation,
     id: Uuid,
     url: Url,
     // Receiver from websocket connection
@@ -45,6 +46,10 @@ impl FakeSubscriber {
 
     pub async fn recv(&mut self) -> Option<GatewayMessage> {
         self.read.recv().await
+    }
+
+    pub async fn try_recv(&mut self) -> Result<GatewayMessage, TryRecvError> {
+        self.read.try_recv()
     }
 
     /// Send an message to the server
@@ -73,6 +78,7 @@ impl FakeSubscriber {
         self.write = tx_send;
         self.read = rx_recv;
 
+        debug!(?self.id, "Attempting to connect to server");
         tokio::spawn(listen(self.url.clone(), tx_recv, rx_send));
     }
 
@@ -103,6 +109,7 @@ async fn listen(
     tokio::spawn(async move {
         while let Some(Ok(msg)) = stream.next().await {
             if let Message::Text(msg) = msg {
+                debug!(?msg, "Message received from server");
                 let unwrapped_message = serde_json::from_str(&msg).unwrap();
                 if write.send(unwrapped_message).await.is_err() {
                     break;
@@ -114,6 +121,7 @@ async fn listen(
     // Listen to messages from a channel and write to websocket connection
     tokio::spawn(async move {
         while let Some(msg) = read.recv().await {
+            debug!(?msg, "Message to be send to server");
             if let SubscriberMessage::CloseConnection(_) = msg {
                 sink.send(tungstenite::Message::Close(None)).await;
                 sink.close().await.unwrap();
