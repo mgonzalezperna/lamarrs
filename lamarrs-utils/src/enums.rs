@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use crate::messages::*;
 use thiserror::Error;
+use strum_macros::EnumIter;
 
 #[derive(Debug, Error)]
 pub enum MessageError{
@@ -10,6 +11,25 @@ pub enum MessageError{
     #[error("Failed to find Message Type: {0}")]
     SerializationError(#[from] serde_json::Error),
 }
+
+#[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
+pub enum OrchestratorMessage{
+    SendSubtitle(SendSubtitle),
+    SendColor(SendColor),
+    Error(GatewayError)
+}
+
+impl std::fmt::Display for OrchestratorMessage{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let value = match self {
+            Self::SendSubtitle(inner) => serde_json::to_value(inner).unwrap(),
+            Self::SendColor(inner) => serde_json::to_value(inner).unwrap(),
+            Self::Error(inner) => serde_json::to_value(inner).unwrap(),
+        };
+        write!(f, "{}", value)
+    }
+}
+
 
 #[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
 pub enum GatewayMessage{
