@@ -137,15 +137,15 @@ async fn test_new_client_subscribes_to_color() {
 #[test_log::test(tokio::test)]
 async fn test_several_clients_connect_and_register() {
     let (listener, url) = start_tcp_stream().await;
-    let mut fake_client_1_left: FakeSubscriber =
+    let fake_client_1_left: FakeSubscriber =
         FakeSubscriber::new(url.clone(), RelativeLocation::Left).await;
-    let mut fake_client_2_left: FakeSubscriber =
+    let fake_client_2_left: FakeSubscriber =
         FakeSubscriber::new(url.clone(), RelativeLocation::Left).await;
-    let mut fake_client_3_center: FakeSubscriber =
+    let fake_client_3_center: FakeSubscriber =
         FakeSubscriber::new(url.clone(), RelativeLocation::Center).await;
-    let mut fake_client_4_right: FakeSubscriber =
+    let fake_client_4_right: FakeSubscriber =
         FakeSubscriber::new(url.clone(), RelativeLocation::Right).await;
-    let mut fake_client_5_center: FakeSubscriber =
+    let fake_client_5_center: FakeSubscriber =
         FakeSubscriber::new(url.clone(), RelativeLocation::Center).await;
     let list_fake_clients = vec![
         fake_client_1_left,
@@ -206,7 +206,7 @@ async fn test_several_clients_subscribe_to_color_different_locations_gets_differ
         client
     })).await;
 
-    color_service_sender.send(ColorMessage::SendColor(payload::SendColor{color: Color::Red, target_location: RelativeLocation::Center})).await.expect("Error sending Color message");
+    color_service_sender.send(ColorMessage::SendColor(SendColor{color: Color::Red, target_location: RelativeLocation::Center})).await.expect("Error sending Color message");
 
     let list_fake_clients = join_all(list_fake_clients.into_iter().map(|mut client| async move{
         match client.location {
@@ -225,7 +225,7 @@ async fn test_several_clients_subscribe_to_color_different_locations_gets_differ
         client
     })).await;
 
-    color_service_sender.send(ColorMessage::SendColor(payload::SendColor{color: Color::Blue, target_location: RelativeLocation::Right})).await.expect("Error sending Color message");
+    color_service_sender.send(ColorMessage::SendColor(SendColor{color: Color::Blue, target_location: RelativeLocation::Right})).await.expect("Error sending Color message");
 
     let list_fake_clients = join_all(list_fake_clients.into_iter().map(|mut client| async move{
         match client.location {
@@ -244,7 +244,7 @@ async fn test_several_clients_subscribe_to_color_different_locations_gets_differ
         client
     })).await;
 
-    color_service_sender.send(ColorMessage::SendColor(payload::SendColor{color: Color::White, target_location: RelativeLocation::Left})).await.expect("Error sending Color message");
+    color_service_sender.send(ColorMessage::SendColor(SendColor{color: Color::White, target_location: RelativeLocation::Left})).await.expect("Error sending Color message");
 
     join_all(list_fake_clients.into_iter().map(|mut client| async move{
         match client.location {
