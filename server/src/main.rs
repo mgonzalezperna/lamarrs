@@ -58,8 +58,12 @@ async fn main() -> Result<(), ServerError> {
         subtitle_service.sender.clone(),
         color_service.sender.clone(),
     );
+
     tokio::select! {
         _ = subtitle_service.run() => {
+            Err(ServerError::TextServiceError)
+        }
+        _ = color_service.run() => {
             Err(ServerError::TextServiceError)
         }
         _ = ws_factory.run(listener) => {
