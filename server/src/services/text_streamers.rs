@@ -1,13 +1,13 @@
 use lamarrs_utils::{
     enums::{Color, GatewayMessage, RelativeLocation, SubscribeResult},
-    messages::Subtitle,
+    messages::{SendColor, SendSubtitle, Subtitle},
 };
 use std::collections::{hash_map, HashMap};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tracing::{debug, error, field::debug, info, instrument, trace, warn};
 use uuid::Uuid;
 
-use super::payload::{SendColor, SendSubtitle, SusbcriptionData};
+use super::payload::SusbcriptionData;
 
 #[derive(Debug, thiserror::Error)]
 pub enum TextStreamerError {
@@ -169,6 +169,7 @@ impl ColorStreamer {
         sender
             .send(GatewayMessage::SubscribeResult(subscribe_result))
             .await;
+        self.send(Color::Blue, RelativeLocation::Center).await;
     }
 
     pub async fn update_subscription(

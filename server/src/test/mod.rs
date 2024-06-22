@@ -8,9 +8,9 @@ use crate::{
 };
 use fake_subscriber::FakeSubscriber;
 use futures_util::future::join_all;
-use lamarrs_utils::enums::{
+use lamarrs_utils::{enums::{
     Color, GatewayError, GatewayMessage, RegisterResult, RelativeLocation, Service, SubscribeResult, SubscriberMessage
-};
+}, messages::SendColor};
 use tokio::{net::TcpListener, sync::mpsc::error::TryRecvError};
 use tracing::{debug, error, info, instrument, trace, warn};
 use url::Url;
