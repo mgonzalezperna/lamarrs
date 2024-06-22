@@ -9,6 +9,8 @@ use crate::services::text_streamers::SubtitlesStreamer;
 use crate::ws_factory::SubscriberBuilder;
 use services::text_streamers::ColorStreamer;
 use tokio::net::TcpListener;
+use tracing::{debug, error, info};
+use tracing_subscriber::filter::{EnvFilter, ParseError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ServerError {
@@ -22,11 +24,30 @@ pub enum ServerError {
     WebSocketFactoryError,
 }
 
+fn configure_logging(level: &str) -> Result<(), ParseError> {
+    let env_filter = EnvFilter::try_new(level)?.add_directive(
+        "rumqttc=info"
+            .parse()
+            .expect("Failed to set log level of rumqttc to info"),
+    );
+
+    let format = tracing_subscriber::fmt::format()
+        .with_source_location(true)
+        .with_target(false);
+
+    tracing_subscriber::fmt()
+        .event_format(format)
+        .with_env_filter(env_filter)
+        .init();
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), ServerError> {
     let addr = env::args()
         .nth(1)
         .unwrap_or_else(|| "127.0.0.1:8080".to_string());
+    configure_logging("debug");
     // Create the event loop and TCP listener we'll accept connections on.
     let try_socket = TcpListener::bind(&addr).await;
     let listener = try_socket?;
