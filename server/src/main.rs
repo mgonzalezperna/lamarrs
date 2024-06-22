@@ -5,6 +5,7 @@ mod services;
 mod subscriber;
 mod test;
 mod ws_factory;
+mod mqtt;
 
 use crate::services::text_streamers::SubtitlesStreamer;
 use crate::ws_factory::SubscriberBuilder;
