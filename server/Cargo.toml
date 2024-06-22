@@ -24,3 +24,6 @@ uuid = "1.8.0"
 tracing = "0.1.40"
 async-time-mock-tokio = { version = "0.1.1", features = ["mock"] }
 test-log = { version = "0.2.16", features = ["trace"] }
+tracing-subscriber = "0.3.18"
+rumqttc = "0.24.0"
+serde = { version = "1.0.203", features = ["derive"] }
