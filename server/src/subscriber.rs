@@ -16,13 +16,14 @@ use tracing::{debug, error, info, instrument, trace, warn};
 
 use thiserror::Error;
 use tokio::io;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{channel, error::SendError, Receiver, Sender};
 
 use lamarrs_utils::enums::{
     GatewayError, GatewayMessage, RegisterResult, RelativeLocation, Service, SubscriberMessage,
 };
 use uuid::Uuid;
 
+use crate::services;
 use crate::services::payload::SusbcriptionData;
 use crate::services::text_streamers::{ColorMessage, SubtitleMessage};
 
@@ -58,7 +59,6 @@ impl SubscriberId {
 
 impl fmt::Display for SubscriberId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        // Use `self.number` to refer to each positional data point.
         match (self.uuid, self.location.clone()) {
             (None, _) => write!(f, "(Unregistered Subscriber, {})", self.addr),
             (Some(uuid), None) => {
@@ -130,21 +130,21 @@ impl Subscriber {
         }
     }
 
+    #[instrument(name = "Subscriber::run", skip(self), fields(id=?self.id.clone()), level = "INFO", ret, err)]
     pub async fn run(&mut self, stream: TcpStream) -> Result<(), WebSocketError> {
-        debug!("Incoming TCP connection from: {}", self.id.addr);
         let (mut outgoing, mut incoming) = self.accept_and_connect(stream).await?;
 
         loop {
             tokio::select! {
                 // Receive messages from websocket connection
                 msg = incoming.next() => {
-                    debug!(?msg, "New message from websocket from {}", self.id);
+                    info!(?msg, "New message from websocket");
                     self.handle_ws_message(msg, &mut outgoing).await?;
                 }
 
                 // Receive messages from any other actor
                 msg = self.inbox.recv() => {
-                    info!(?msg, "Sending message via websocket to {}", self.id);
+                    info!(?msg, "Sending message via websocket");
                     if let Some(message) = msg {
                         let _ = outgoing.send(TungsteniteMessage::Text(serde_json::to_string(&message).unwrap())).await;
                     }
@@ -153,6 +153,7 @@ impl Subscriber {
         }
     }
 
+    #[instrument(name = "Subscriber::handle_ws_message", skip(self), fields(id=?self.id.clone()), level = "INFO", ret, err)]
     async fn handle_ws_message(
         &mut self,
         msg: Option<Result<tungstenite::Message, tokio_tungstenite::tungstenite::Error>>,
@@ -161,7 +162,7 @@ impl Subscriber {
         match msg {
             // Process inbound messages
             Some(Ok(TungsteniteMessage::Text(payload))) => {
-                debug!(payload, "Inbound message from {}:", self.id);
+                debug!(?payload, "Inbound Text Message");
                 self.process_payload(payload).await?;
             }
             // Handle ping responses
@@ -196,61 +197,84 @@ impl Subscriber {
         Ok(())
     }
 
+    #[instrument(name = "Subscriber::process_payload", skip(self), fields(id=?self.id.clone()), level = "INFO", ret, err)]
     async fn process_payload(&mut self, payload: String) -> Result<(), InternalError> {
         if self.id.clone().unregistered() {
-            match serde_json::from_str(&payload) {
-                Ok(SubscriberMessage::Register((id, location))) => {
-                    info!(?id, ?location, "Registring new Subscriber {}", self.id);
-                    self.id.uuid = Some(id);
-                    self.id.location = Some(location);
-                    self.sender
-                        .send(GatewayMessage::RegisterResult(RegisterResult::Success))
-                        .await
-                        .unwrap()
-                }
-                Ok(_) => {
-                    info!(?payload, "Message received from {}", self.id);
-                    self.sender
-                        .send(GatewayMessage::Error(GatewayError::UnregisteredSubscriber))
-                        .await
-                        .unwrap();
-                    return Ok(()); // Err(InternalError::UnregisteredSubscriber);
-                }
-                Err(_) => todo!(),
+            if let Err(error) = self.on_unregistered_subscriber_message(payload).await {
+                error!(
+                    ?error,
+                    "Error processing incoming message from unsubscribed Actor."
+                );
             }
         } else {
-            match serde_json::from_str(&payload) {
-                Ok(SubscriberMessage::Subscribe(service)) => {
-                    info!(?service, "Service Subscription request by {}", self.id);
-
-                    match service {
-                        Service::Subtitle => {
-                            self.subtitles
-                                .send(SubtitleMessage::Subscribe(SusbcriptionData {
-                                    sender_id: self.id.uuid.unwrap(),
-                                    sender: self.sender.clone(),
-                                    location: self.id.location.clone().unwrap(),
-                                }))
-                                .await
-                                .unwrap();
-                        }
-                        Service::Color => {
-                            self.color
-                                .send(ColorMessage::Subscribe(SusbcriptionData {
-                                    sender_id: self.id.uuid.unwrap(),
-                                    sender: self.sender.clone(),
-                                    location: self.id.location.clone().unwrap(),
-                                }))
-                                .await
-                                .unwrap();
-                        }
-                    }
-                }
-                Err(_) => todo!(),
-                _ => todo!(),
+            if let Err(error) = self.on_subscriber_message(payload).await {
+                error!(?error, "Error processing incoming message from Subscriber.");
             }
         }
         Ok(())
+    }
+
+    #[instrument(name = "Subscriber::on_unregistered_subscriber_message", skip(self), fields(id=?self.id.clone()), level = "INFO", ret, err)]
+    async fn on_unregistered_subscriber_message(
+        &mut self,
+        payload: String,
+    ) -> Result<(), InternalError> {
+        match serde_json::from_str(&payload) {
+            Ok(SubscriberMessage::Register((id, location))) => {
+                info!(?id, ?location, "Registring new Subscriber {}", self.id);
+                self.id.uuid = Some(id);
+                self.id.location = Some(location);
+                self.sender
+                    .send(GatewayMessage::RegisterResult(RegisterResult::Success))
+                    .await?;
+                Ok(())
+            }
+            Ok(_) => {
+                warn!(?payload, "Message received from {}", self.id);
+                self.sender
+                    .send(GatewayMessage::Error(GatewayError::UnregisteredSubscriber))
+                    .await?;
+                Err(InternalError::UnregisteredSubscriber(payload))
+            }
+            Err(_) => {
+                error!(?payload, "Weird message received:");
+                Err(InternalError::UnrecognizableMessage(payload))
+            }
+        }
+    }
+
+    #[instrument(name = "Subscriber::on_subscriber_message", skip(self), fields(id=?self.id.clone()), level = "INFO", ret, err)]
+    async fn on_subscriber_message(&mut self, payload: String) -> Result<(), InternalError> {
+        match serde_json::from_str(&payload) {
+            Ok(SubscriberMessage::Subscribe(service)) => {
+                info!(?service, "Service Subscription request");
+
+                match service {
+                    Service::Subtitle => {
+                        self.subtitles
+                            .send(SubtitleMessage::Subscribe(SusbcriptionData {
+                                sender_id: self.id.uuid.unwrap(),
+                                sender: self.sender.clone(),
+                                location: self.id.location.clone().unwrap(),
+                            }))
+                            .await?;
+                        Ok(())
+                    }
+                    Service::Color => {
+                        self.color
+                            .send(ColorMessage::Subscribe(SusbcriptionData {
+                                sender_id: self.id.uuid.unwrap(),
+                                sender: self.sender.clone(),
+                                location: self.id.location.clone().unwrap(),
+                            }))
+                            .await?;
+                        Ok(())
+                    }
+                }
+            }
+            Err(_) => todo!(),
+            _ => todo!(),
+        }
     }
 
     /// Reconnects and recreate inbox
@@ -305,9 +329,14 @@ pub enum WebSocketError {
 
 #[derive(Debug, Error)]
 pub enum InternalError {
-    #[error("Send error: {0}")]
-    TungsteniteError(#[from] tungstenite::Error),
-
-    #[error("Invalid message received from an unidentified Subscriber")]
-    UnregisteredSubscriber,
+    #[error("Valid Message received from an unidentified Subscriber: {0}")]
+    UnregisteredSubscriber(String),
+    #[error("Invalid message received from an unidentified Subscriber: {0}")]
+    UnrecognizableMessage(String),
+    #[error("Error sending Gateway Message: {0}")]
+    GatewayMessageSendError(#[from] SendError<lamarrs_utils::enums::GatewayMessage>),
+    #[error("Error sending message to Subtitle Actor: {0}")]
+    SubtitlesMessageSendError(#[from] SendError<services::text_streamers::SubtitleMessage>),
+    #[error("Error sending message to Color Actor: {0}")]
+    ColorMessageSendError(#[from] SendError<services::text_streamers::ColorMessage>),
 }

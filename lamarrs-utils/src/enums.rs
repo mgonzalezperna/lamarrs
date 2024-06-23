@@ -1,10 +1,11 @@
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use crate::messages::*;
+use serde::{Deserialize, Serialize};
+use strum_macros::EnumIter;
 use thiserror::Error;
+use uuid::Uuid;
 
 #[derive(Debug, Error)]
-pub enum MessageError{
+pub enum MessageError {
     #[error("Error guessing the Message type")]
     GuessingError(String),
     #[error("Failed to find Message Type: {0}")]
@@ -12,16 +13,34 @@ pub enum MessageError{
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
-pub enum GatewayMessage{
+pub enum OrchestratorMessage {
+    SendSubtitle(SendSubtitle),
+    SendColor(SendColor),
+    Error(GatewayError),
+}
+
+impl std::fmt::Display for OrchestratorMessage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let value = match self {
+            Self::SendSubtitle(inner) => serde_json::to_value(inner).unwrap(),
+            Self::SendColor(inner) => serde_json::to_value(inner).unwrap(),
+            Self::Error(inner) => serde_json::to_value(inner).unwrap(),
+        };
+        write!(f, "{}", value)
+    }
+}
+
+#[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
+pub enum GatewayMessage {
     RegisterResult(RegisterResult),
     Suscribe(Suscribe),
     SubscribeResult(SubscribeResult),
     Subtitle(Subtitle),
     Color(Color),
-    Error(GatewayError)
+    Error(GatewayError),
 }
 
-impl std::fmt::Display for GatewayMessage{
+impl std::fmt::Display for GatewayMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let value = match self {
             Self::RegisterResult(inner) => serde_json::to_value(inner).unwrap(),
@@ -36,21 +55,21 @@ impl std::fmt::Display for GatewayMessage{
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
-pub enum GatewayError{
+pub enum GatewayError {
     UnregisteredSubscriber,
 }
 
-impl std::fmt::Display for GatewayError{
+impl std::fmt::Display for GatewayError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let value = match self {
-            Self::UnregisteredSubscriber => "UnregisteredSubscriber"
+            Self::UnregisteredSubscriber => "UnregisteredSubscriber",
         };
         write!(f, "{}", value)
     }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub enum SubscriberMessage{
+pub enum SubscriberMessage {
     // The first message after connecting must be a Register, with its own UUID.
     Register((Uuid, RelativeLocation)),
     // A Client wants to subscribe to the service.
@@ -59,12 +78,12 @@ pub enum SubscriberMessage{
     CloseConnection(CloseConnectionReason),
 }
 
-impl std::fmt::Display for SubscriberMessage{
+impl std::fmt::Display for SubscriberMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let value = match self {
             Self::Register(inner) => serde_json::to_value(inner).unwrap(),
             Self::Subscribe(inner) => serde_json::to_value(inner).unwrap(),
-            Self::CloseConnection(inner)=> serde_json::to_value(inner).unwrap(),
+            Self::CloseConnection(inner) => serde_json::to_value(inner).unwrap(),
         };
         write!(f, "{}", value)
     }
@@ -73,23 +92,22 @@ impl std::fmt::Display for SubscriberMessage{
 impl SubscriberMessage {
     pub fn deserialize(data: String) -> Option<Self> {
         serde_json::from_str(&data).ok()
-    } 
+    }
 }
 
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub enum RelativeLocation{
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, EnumIter)]
+pub enum RelativeLocation {
     Left,
     Center,
-    Right
+    Right,
 }
 
-impl std::fmt::Display for RelativeLocation{
+impl std::fmt::Display for RelativeLocation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let value = match self {
-            Self::Left=> "Left",
-            Self::Center=> "Center",
-            Self::Right=> "Right",
+            Self::Left => "Left",
+            Self::Center => "Center",
+            Self::Right => "Right",
         };
         write!(f, "{}", value)
     }
@@ -105,63 +123,60 @@ pub enum SubscribeResult {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub enum RegisterResult{
+pub enum RegisterResult {
     Success,
     AlreadyRegistered,
     Failed,
 }
 
-
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub enum CloseConnectionReason{
+pub enum CloseConnectionReason {
     SubscriberRequest,
     GatewayRequest,
-    Unexpected
+    Unexpected,
 }
 
-impl std::fmt::Display for CloseConnectionReason{
+impl std::fmt::Display for CloseConnectionReason {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let value = match self {
-            Self::SubscriberRequest=> "Subscriber Request",
-            Self::GatewayRequest=> "Gateway Request",
-            Self::Unexpected=> "Unexpected",
+            Self::SubscriberRequest => "Subscriber Request",
+            Self::GatewayRequest => "Gateway Request",
+            Self::Unexpected => "Unexpected",
         };
         write!(f, "{}", value)
     }
 }
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub enum Service{
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, EnumIter)]
+pub enum Service {
     Subtitle,
-    Color
+    Color,
 }
 
-impl std::fmt::Display for Service{
+impl std::fmt::Display for Service {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let value = match self {
-            Self::Subtitle=> "Subtitle",
-            Self::Color=> "Color"
+            Self::Subtitle => "Subtitle",
+            Self::Color => "Color",
         };
         write!(f, "{}", value)
     }
 }
 
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub enum Color{
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, EnumIter)]
+pub enum Color {
     Red,
     Blue,
     White,
     Black,
 }
 
-impl std::fmt::Display for Color{
+impl std::fmt::Display for Color {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let value = match self {
-            Self::Red=> "Red",
-            Self::Blue=> "Blue",
-            Self::White=> "White",
-            Self::Black=> "Black",
+            Self::Red => "red",
+            Self::Blue => "blue",
+            Self::White => "white",
+            Self::Black => "black",
         };
         write!(f, "{}", value)
     }
