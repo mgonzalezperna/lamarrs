@@ -1,13 +1,14 @@
 use std::env;
 use std::io;
+mod mqtt;
 mod services;
 mod subscriber;
 mod test;
 mod ws_factory;
-mod mqtt;
 
 use crate::services::text_streamers::SubtitlesStreamer;
 use crate::ws_factory::SubscriberBuilder;
+use mqtt::MqttInterface;
 use services::text_streamers::ColorStreamer;
 use tokio::net::TcpListener;
 use tracing::{debug, error, info};
@@ -55,6 +56,10 @@ async fn main() -> Result<(), ServerError> {
     println!("Listening on: {}", addr);
     let mut subtitle_service = SubtitlesStreamer::new();
     let mut color_service = ColorStreamer::new();
+    let mut mqtt_interface = MqttInterface::new(
+        subtitle_service.sender.clone(),
+        color_service.sender.clone(),
+    );
     let ws_factory = SubscriberBuilder::new(
         subtitle_service.sender.clone(),
         color_service.sender.clone(),
@@ -66,6 +71,9 @@ async fn main() -> Result<(), ServerError> {
         }
         _ = color_service.run() => {
             Err(ServerError::TextServiceError)
+        }
+        _ = mqtt_interface.run() => {
+            Err(ServerError::WebSocketFactoryError)
         }
         _ = ws_factory.run(listener) => {
             Err(ServerError::WebSocketFactoryError)
