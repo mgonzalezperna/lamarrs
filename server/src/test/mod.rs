@@ -2,15 +2,22 @@ pub mod fake_subscriber;
 use std::{thread, time::Duration};
 
 use crate::{
-    services::{payload, text_streamers::{ColorMessage, ColorStreamer, SubtitlesStreamer}},
+    services::{
+        payload,
+        text_streamers::{ColorMessage, ColorStreamer, SubtitlesStreamer},
+    },
     ws_factory::SubscriberBuilder,
     ServerError,
 };
 use fake_subscriber::FakeSubscriber;
 use futures_util::future::join_all;
-use lamarrs_utils::{enums::{
-    Color, GatewayError, GatewayMessage, RegisterResult, RelativeLocation, Service, SubscribeResult, SubscriberMessage
-}, messages::SendColor};
+use lamarrs_utils::{
+    enums::{
+        Color, GatewayError, GatewayMessage, RegisterResult, RelativeLocation, Service,
+        SubscribeResult, SubscriberMessage,
+    },
+    messages::SendColor,
+};
 use tokio::{net::TcpListener, sync::mpsc::error::TryRecvError};
 use tracing::{debug, error, info, instrument, trace, warn};
 use url::Url;
@@ -161,18 +168,18 @@ async fn test_several_clients_connect_and_register() {
         client.start().await;
         client.register().await;
         client
-    })).await;
+    }))
+    .await;
 
-    join_all(
-        list_fake_clients.into_iter().map(|mut client| async move{
-                let register_result = client.recv().await;
-                assert_eq!(
-                    GatewayMessage::RegisterResult(RegisterResult::Success),
-                    register_result.unwrap()
-                );
-    })).await;
+    join_all(list_fake_clients.into_iter().map(|mut client| async move {
+        let register_result = client.recv().await;
+        assert_eq!(
+            GatewayMessage::RegisterResult(RegisterResult::Success),
+            register_result.unwrap()
+        );
+    }))
+    .await;
 }
-
 
 #[test_log::test(tokio::test)]
 async fn test_several_clients_subscribe_to_color_different_locations_gets_different_messages() {
@@ -201,65 +208,80 @@ async fn test_several_clients_subscribe_to_color_different_locations_gets_differ
         client.start().await;
         client.register().await;
         client.recv().await;
-        client.send(SubscriberMessage::Subscribe(Service::Color)).await.expect("error subscribing");
+        client
+            .send(SubscriberMessage::Subscribe(Service::Color))
+            .await
+            .expect("error subscribing");
         client.recv().await;
         client
-    })).await;
+    }))
+    .await;
 
-    color_service_sender.send(ColorMessage::SendColor(SendColor{color: Color::Red, target_location: RelativeLocation::Center})).await.expect("Error sending Color message");
+    color_service_sender
+        .send(ColorMessage::SendColor(SendColor {
+            color: Color::Red,
+            target_location: RelativeLocation::Center,
+        }))
+        .await
+        .expect("Error sending Color message");
 
-    let list_fake_clients = join_all(list_fake_clients.into_iter().map(|mut client| async move{
+    let list_fake_clients = join_all(list_fake_clients.into_iter().map(|mut client| async move {
         match client.location {
             RelativeLocation::Center => {
                 let new_color = client.recv().await;
-                assert_eq!(
-                    GatewayMessage::Color(Color::Red),
-                    new_color.unwrap()
-                );
-            },
+                assert_eq!(GatewayMessage::Color(Color::Red), new_color.unwrap());
+            }
             _ => {
                 let empty = client.try_recv().await;
-                assert_eq!(Err(TryRecvError::Empty), empty);    
+                assert_eq!(Err(TryRecvError::Empty), empty);
             }
         }
         client
-    })).await;
+    }))
+    .await;
 
-    color_service_sender.send(ColorMessage::SendColor(SendColor{color: Color::Blue, target_location: RelativeLocation::Right})).await.expect("Error sending Color message");
+    color_service_sender
+        .send(ColorMessage::SendColor(SendColor {
+            color: Color::Blue,
+            target_location: RelativeLocation::Right,
+        }))
+        .await
+        .expect("Error sending Color message");
 
-    let list_fake_clients = join_all(list_fake_clients.into_iter().map(|mut client| async move{
+    let list_fake_clients = join_all(list_fake_clients.into_iter().map(|mut client| async move {
         match client.location {
-            RelativeLocation::Right=> {
+            RelativeLocation::Right => {
                 let new_color = client.recv().await;
-                assert_eq!(
-                    GatewayMessage::Color(Color::Blue),
-                    new_color.unwrap()
-                );
-            },
+                assert_eq!(GatewayMessage::Color(Color::Blue), new_color.unwrap());
+            }
             _ => {
                 let empty = client.try_recv().await;
-                assert_eq!(Err(TryRecvError::Empty), empty);    
+                assert_eq!(Err(TryRecvError::Empty), empty);
             }
         }
         client
-    })).await;
+    }))
+    .await;
 
-    color_service_sender.send(ColorMessage::SendColor(SendColor{color: Color::White, target_location: RelativeLocation::Left})).await.expect("Error sending Color message");
+    color_service_sender
+        .send(ColorMessage::SendColor(SendColor {
+            color: Color::White,
+            target_location: RelativeLocation::Left,
+        }))
+        .await
+        .expect("Error sending Color message");
 
-    join_all(list_fake_clients.into_iter().map(|mut client| async move{
+    join_all(list_fake_clients.into_iter().map(|mut client| async move {
         match client.location {
-            RelativeLocation::Left=> {
+            RelativeLocation::Left => {
                 let new_color = client.recv().await;
-                assert_eq!(
-                    GatewayMessage::Color(Color::White),
-                    new_color.unwrap()
-                );
-            },
+                assert_eq!(GatewayMessage::Color(Color::White), new_color.unwrap());
+            }
             _ => {
                 let empty = client.try_recv().await;
-                assert_eq!(Err(TryRecvError::Empty), empty);    
+                assert_eq!(Err(TryRecvError::Empty), empty);
             }
         }
-    })).await;
-
+    }))
+    .await;
 }

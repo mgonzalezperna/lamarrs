@@ -2,7 +2,10 @@ use futures_util::{SinkExt, StreamExt};
 use lamarrs_utils::enums::{self, GatewayMessage, RelativeLocation, SubscriberMessage};
 use tokio::{
     io,
-    sync::mpsc::{self, error::{SendError, TryRecvError}},
+    sync::mpsc::{
+        self,
+        error::{SendError, TryRecvError},
+    },
 };
 use tracing::{debug, field::debug};
 use tungstenite::{http::response, Message};

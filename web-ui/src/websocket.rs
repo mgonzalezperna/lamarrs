@@ -1,5 +1,8 @@
 use dioxus::signals::{Signal, Writable};
-use futures::{channel::mpsc::{Receiver, Sender}, SinkExt, StreamExt};
+use futures::{
+    channel::mpsc::{Receiver, Sender},
+    SinkExt, StreamExt,
+};
 use lamarrs_utils::enums::{GatewayError, GatewayMessage, SubscriberMessage};
 use reqwasm::websocket::{futures::WebSocket, Message};
 
@@ -20,7 +23,12 @@ impl WebsocketService {
         spawn_local(async move {
             while let Some(subscriber_message) = receiver.next().await {
                 log::debug!("Sending message to Gateway {}", subscriber_message);
-                outgoing.send(Message::Text(serde_json::to_string(&subscriber_message).unwrap())).await.unwrap();
+                outgoing
+                    .send(Message::Text(
+                        serde_json::to_string(&subscriber_message).unwrap(),
+                    ))
+                    .await
+                    .unwrap();
             }
         });
 
@@ -35,13 +43,14 @@ impl WebsocketService {
                             match serde_json::from_str(&payload) {
                                 Ok(GatewayMessage::Color(color)) => {
                                     log::info!("Request change of Color by Gateway: {}", color);
-                                    bg.set(color.to_string());                                
+                                    bg.set(color.to_string());
                                 }
                                 Err(_) => todo!(),
                                 _ => {
                                     log::info!("Notification Message Received: {}", payload);
-                                },
-                        }},
+                                }
+                            }
+                        }
                         Err(e) => {
                             log::error!("ERROR: {:?}", e)
                         }
@@ -54,8 +63,6 @@ impl WebsocketService {
             }
         });
 
-        Self { 
-            sender
-        }
+        Self { sender }
     }
 }

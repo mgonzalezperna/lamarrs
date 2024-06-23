@@ -26,7 +26,8 @@ impl SubscriberBuilder {
             match listener.accept().await {
                 Ok((stream, addr)) => {
                     tokio::spawn({
-                        let mut new_subscriber =Subscriber::new(self.subtitle.clone(), self.color.clone(), addr);
+                        let mut new_subscriber =
+                            Subscriber::new(self.subtitle.clone(), self.color.clone(), addr);
                         async move {
                             new_subscriber.run(stream).await;
                         }

@@ -16,7 +16,7 @@ use tracing::{debug, error, info, instrument, trace, warn};
 
 use thiserror::Error;
 use tokio::io;
-use tokio::sync::mpsc::{channel, Receiver, Sender, error::SendError};
+use tokio::sync::mpsc::{channel, error::SendError, Receiver, Sender};
 
 use lamarrs_utils::enums::{
     GatewayError, GatewayMessage, RegisterResult, RelativeLocation, Service, SubscriberMessage,
@@ -59,7 +59,6 @@ impl SubscriberId {
 
 impl fmt::Display for SubscriberId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        // Use `self.number` to refer to each positional data point.
         match (self.uuid, self.location.clone()) {
             (None, _) => write!(f, "(Unregistered Subscriber, {})", self.addr),
             (Some(uuid), None) => {
@@ -202,7 +201,10 @@ impl Subscriber {
     async fn process_payload(&mut self, payload: String) -> Result<(), InternalError> {
         if self.id.clone().unregistered() {
             if let Err(error) = self.on_unregistered_subscriber_message(payload).await {
-                error!(?error, "Error processing incoming message from unsubscribed Actor.");
+                error!(
+                    ?error,
+                    "Error processing incoming message from unsubscribed Actor."
+                );
             }
         } else {
             if let Err(error) = self.on_subscriber_message(payload).await {
@@ -213,7 +215,10 @@ impl Subscriber {
     }
 
     #[instrument(name = "Subscriber::on_unregistered_subscriber_message", skip(self), fields(id=?self.id.clone()), level = "INFO", ret, err)]
-    async fn on_unregistered_subscriber_message(&mut self, payload: String) -> Result<(), InternalError> {
+    async fn on_unregistered_subscriber_message(
+        &mut self,
+        payload: String,
+    ) -> Result<(), InternalError> {
         match serde_json::from_str(&payload) {
             Ok(SubscriberMessage::Register((id, location))) => {
                 info!(?id, ?location, "Registring new Subscriber {}", self.id);
@@ -234,10 +239,9 @@ impl Subscriber {
             Err(_) => {
                 error!(?payload, "Weird message received:");
                 Err(InternalError::UnrecognizableMessage(payload))
-            },
+            }
         }
     }
-
 
     #[instrument(name = "Subscriber::on_subscriber_message", skip(self), fields(id=?self.id.clone()), level = "INFO", ret, err)]
     async fn on_subscriber_message(&mut self, payload: String) -> Result<(), InternalError> {
@@ -272,7 +276,6 @@ impl Subscriber {
             _ => todo!(),
         }
     }
-
 
     /// Reconnects and recreate inbox
     async fn recreate_inbox(
