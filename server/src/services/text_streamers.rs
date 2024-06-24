@@ -73,8 +73,10 @@ impl SubtitlesStreamer {
         sender: Sender<GatewayMessage>,
         location: RelativeLocation,
     ) {
+        info!(?sender_id, "Subtitles subscription update for");
         let update_result = match self.targets.entry(sender_id) {
             hash_map::Entry::Occupied(mut occupied_entry) => {
+                info!(?sender_id, "Found entry for");
                 let entry = occupied_entry.get_mut();
                 *entry = (sender.clone(), location.clone());
                 SubscribeResult::UpdatedSubscription
@@ -169,7 +171,6 @@ impl ColorStreamer {
         sender
             .send(GatewayMessage::SubscribeResult(subscribe_result))
             .await;
-        self.send(Color::Blue, RelativeLocation::Center).await;
     }
 
     pub async fn update_subscription(
@@ -224,8 +225,12 @@ impl ColorStreamer {
                             .await
                     }
                     ColorMessage::UpdateSubscription(details) => {
-                        self.subscribe(details.sender_id, details.sender, details.location)
-                            .await
+                        self.update_subscription(
+                            details.sender_id,
+                            details.sender,
+                            details.location,
+                        )
+                        .await
                     }
                     ColorMessage::SendColor(color) => {
                         self.send(color.color, color.target_location).await
