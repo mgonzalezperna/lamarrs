@@ -279,14 +279,14 @@ impl Subscriber {
                     .send(SubtitleMessage::UpdateSubscription(SusbcriptionData {
                         sender_id: self.id.uuid.unwrap(),
                         sender: self.sender.clone(),
-                        location: self.id.location.clone(),
+                        location: self.id.location.clone().unwrap(),
                     }))
                     .await?;
                 self.color
                     .send(ColorMessage::UpdateSubscription(SusbcriptionData {
                         sender_id: self.id.uuid.unwrap(),
                         sender: self.sender.clone(),
-                        location: self.id.location.clone(),
+                        location: self.id.location.clone().unwrap(),
                     }))
                     .await?;
                 Ok(())
