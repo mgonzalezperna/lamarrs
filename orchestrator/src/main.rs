@@ -1,4 +1,8 @@
-use std::time::Duration;
+use std::{
+    str::FromStr,
+    thread,
+    time::{self, Duration},
+};
 
 use inquire::{CustomType, InquireError, Select};
 use lamarrs_utils::{
@@ -6,7 +10,9 @@ use lamarrs_utils::{
     error,
     messages::{SendColor, SendSubtitle, Subtitle},
 };
-use rumqttc::{mqttbytes::QoS, Client, MqttOptions};
+use lipsum::lipsum_words_with_rng;
+use rand::seq::SliceRandom;
+use rumqttc::{mqttbytes::QoS, Client, Connection, EventLoop, MqttOptions};
 use strum::{EnumIter, IntoEnumIterator};
 use tracing::{info, instrument};
 use tracing_subscriber::filter::{EnvFilter, ParseError};
@@ -35,15 +41,52 @@ fn main() {
     let port: u16 = 1883;
     let mut mqttoptions = MqttOptions::new("lamarrs-orchestrator", host, port);
     mqttoptions.set_keep_alive(Duration::from_secs(5));
-    let (mut mqtt_sender, mut mqtt_receiver) = Client::new(mqttoptions, 10);
+    let (mut mqtt_sender, mut mqtt_receiver) = Client::new(mqttoptions.clone(), 10);
     mqtt_sender
         .subscribe("lamarrs/orchestrator", QoS::AtMostOnce)
         .unwrap();
 
-    let service: Vec<Service> = Service::iter().collect::<Vec<_>>();
+    let mode: Vec<&str> = vec!["Loop", "Single Message"];
+    let services: Vec<Service> = Service::iter().collect::<Vec<_>>();
     let locations: Vec<RelativeLocation> = RelativeLocation::iter().collect::<Vec<_>>();
+
+    if Select::new("Select mode for the orchestrator", mode)
+        .prompt()
+        .unwrap()
+        == "Loop"
+    {
+        info!("Entering Loop mode, to exit please press Ctrl+C");
+        loop {
+            let rnd_service = services.choose(&mut rand::thread_rng()).unwrap();
+            let rnd_location = locations.choose(&mut rand::thread_rng()).unwrap();
+            let orchestrator_message: OrchestratorMessage = match rnd_service {
+                Service::Subtitle => OrchestratorMessage::SendSubtitle(SendSubtitle {
+                    subtitle: Subtitle::from_str(
+                        lipsum_words_with_rng(&mut rand::thread_rng(), 3).as_str(),
+                    )
+                    .unwrap(),
+                    target_location: rnd_location.to_owned(),
+                }),
+                Service::Color => OrchestratorMessage::SendColor(SendColor {
+                    color: Color::iter()
+                        .collect::<Vec<_>>()
+                        .choose(&mut rand::thread_rng())
+                        .unwrap()
+                        .to_owned(),
+                    target_location: rnd_location.to_owned(),
+                }),
+            };
+            send_to_mqtt(mqtt_sender.clone(), orchestrator_message);
+            while let Some(Ok(notification)) = mqtt_receiver.iter().next() {
+                info!("MQTT results= {:?}", notification);
+            }
+            let ten_millis = time::Duration::from_secs(1);
+            thread::sleep(ten_millis);
+        }
+    }
+
     let selected_service: Result<Service, InquireError> =
-        Select::new("Select service to orchestrate", service).prompt();
+        Select::new("Select service to orchestrate", services).prompt();
     let target_location: Result<RelativeLocation, InquireError> =
         Select::new("What's the target location", locations).prompt();
 
@@ -56,22 +99,7 @@ fn main() {
         Ok(Service::Color) => on_color(target_location.unwrap()),
         Err(_) => panic!("There was an error, please try again"),
     };
-
-    info!(
-        "Message to be sent via MQTT {}",
-        serde_json::to_string(&orchestrator_message)
-            .unwrap()
-            .to_string()
-    );
-    let sending_results = mqtt_sender.publish(
-        "lamarrs/orchestrator",
-        QoS::AtLeastOnce,
-        false,
-        serde_json::to_string(&orchestrator_message).unwrap(),
-    );
-    info!(?sending_results, "Sending results");
-    mqtt_sender.disconnect();
-
+    send_to_mqtt(mqtt_sender, orchestrator_message);
     while let Some(Ok(notification)) = mqtt_receiver.iter().next() {
         info!("MQTT results= {:?}", notification);
     }
@@ -106,4 +134,27 @@ fn on_color(target_location: RelativeLocation) -> OrchestratorMessage {
         }),
         Err(_) => panic! {"There was an error building the color message to be sent"},
     }
+}
+
+#[instrument(
+    name = "Orchestrator::send_to_mqtt",
+    skip(mqtt_sender),
+    level = "INFO",
+    ret
+)]
+fn send_to_mqtt(mqtt_sender: Client, orchestrator_message: OrchestratorMessage) {
+    info!(
+        "Message to be sent via MQTT {}",
+        serde_json::to_string(&orchestrator_message)
+            .unwrap()
+            .to_string()
+    );
+    let sending_results = mqtt_sender.publish(
+        "lamarrs/orchestrator",
+        QoS::AtLeastOnce,
+        false,
+        serde_json::to_string(&orchestrator_message).unwrap(),
+    );
+    info!(?sending_results, "Sending results");
+    mqtt_sender.disconnect();
 }

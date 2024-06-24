@@ -74,6 +74,8 @@ pub enum SubscriberMessage {
     Register((Uuid, RelativeLocation)),
     // A Client wants to subscribe to the service.
     Subscribe(Service),
+    // A Client wants to subscribe to the service.
+    UpdateLocation(RelativeLocation),
     // A Client wants to update its location.
     CloseConnection(CloseConnectionReason),
 }
@@ -83,6 +85,7 @@ impl std::fmt::Display for SubscriberMessage {
         let value = match self {
             Self::Register(inner) => serde_json::to_value(inner).unwrap(),
             Self::Subscribe(inner) => serde_json::to_value(inner).unwrap(),
+            Self::UpdateLocation(inner) => serde_json::to_value(inner).unwrap(),
             Self::CloseConnection(inner) => serde_json::to_value(inner).unwrap(),
         };
         write!(f, "{}", value)
