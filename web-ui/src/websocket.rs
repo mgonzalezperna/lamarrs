@@ -41,6 +41,10 @@ impl WebsocketService {
                         Ok(Message::Text(payload)) => {
                             log::debug!("From Gateway: {}", payload);
                             match serde_json::from_str(&payload) {
+                                Ok(GatewayMessage::Subtitle(subtitle)) => {
+                                    log::info!("New subtitles sent by Gateway: {}", subtitle);
+                                    subs.set(subtitle.to_string());
+                                }
                                 Ok(GatewayMessage::Color(color)) => {
                                     log::info!("Request change of Color by Gateway: {}", color);
                                     bg.set(color.to_string());
