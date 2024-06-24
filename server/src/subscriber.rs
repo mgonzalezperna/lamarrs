@@ -272,6 +272,25 @@ impl Subscriber {
                     }
                 }
             }
+            Ok(SubscriberMessage::UpdateLocation(new_location)) => {
+                info!(?new_location, "Location update request");
+                self.id.location = Some(new_location.clone());
+                self.subtitles
+                    .send(SubtitleMessage::UpdateSubscription(SusbcriptionData {
+                        sender_id: self.id.uuid.unwrap(),
+                        sender: self.sender.clone(),
+                        location: self.id.location.clone(),
+                    }))
+                    .await?;
+                self.color
+                    .send(ColorMessage::UpdateSubscription(SusbcriptionData {
+                        sender_id: self.id.uuid.unwrap(),
+                        sender: self.sender.clone(),
+                        location: self.id.location.clone(),
+                    }))
+                    .await?;
+                Ok(())
+            }
             Err(_) => todo!(),
             _ => todo!(),
         }
