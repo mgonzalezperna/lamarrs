@@ -3,8 +3,7 @@ use std::{thread, time::Duration};
 
 use crate::{
     services::{
-        payload,
-        text_streamers::{ColorMessage, ColorStreamer, SubtitlesStreamer},
+        payload, sound_streamers::MidiStreamer, text_streamers::{ColorMessage, ColorStreamer, SubtitlesStreamer}
     },
     ws_factory::SubscriberBuilder,
     ServerError,
@@ -23,10 +22,11 @@ use tracing::{debug, error, info, instrument, trace, warn};
 use url::Url;
 
 #[cfg(test)]
-fn create_services() -> (SubtitlesStreamer, ColorStreamer) {
+fn create_services() -> (SubtitlesStreamer, ColorStreamer, MidiStreamer) {
     let subtitle_service = SubtitlesStreamer::new();
     let color_service = ColorStreamer::new();
-    (subtitle_service, color_service)
+    let midi_service = MidiStreamer::new();
+    (subtitle_service, color_service, midi_service)
 }
 
 async fn start_tcp_stream() -> (TcpListener, Url) {
@@ -44,18 +44,23 @@ async fn start_tcp_stream() -> (TcpListener, Url) {
 async fn start_app(
     mut subtitle_service: SubtitlesStreamer,
     mut color_service: ColorStreamer,
+    mut midi_service: MidiStreamer,
     listener: TcpListener,
 ) -> Result<(), ServerError> {
     let ws_factory = SubscriberBuilder::new(
         subtitle_service.sender.clone(),
         color_service.sender.clone(),
+        midi_service.sender.clone(),
     );
     tokio::select! {
         _ = subtitle_service.run() => {
-            Err(ServerError::TextServiceError)
+            Err(ServerError::SubtitleServiceError)
         }
         _ = color_service.run() => {
-            Err(ServerError::TextServiceError)
+            Err(ServerError::ColorServiceError)
+        }
+        _ = midi_service.run() => {
+            Err(ServerError::MidiServiceError)
         }
         _ = ws_factory.run(listener) => {
             Err(ServerError::WebSocketFactoryError)
@@ -67,8 +72,8 @@ async fn start_app(
 async fn test_create_ws_for_new_client() {
     let (listener, url) = start_tcp_stream().await;
     let mut fake_client: FakeSubscriber = FakeSubscriber::new(url, RelativeLocation::Center).await;
-    let (subtitle_service, color_service) = create_services();
-    tokio::spawn(start_app(subtitle_service, color_service, listener));
+    let (subtitle_service, color_service, midi_service) = create_services();
+    tokio::spawn(start_app(subtitle_service, color_service, midi_service, listener));
     fake_client.start().await;
     fake_client.register().await;
     let result = fake_client.recv().await.unwrap();
@@ -82,8 +87,8 @@ async fn test_create_ws_for_new_client() {
 async fn test_new_client_tries_to_subscribe_without_registering() {
     let (listener, url) = start_tcp_stream().await;
     let mut fake_client: FakeSubscriber = FakeSubscriber::new(url, RelativeLocation::Center).await;
-    let (subtitle_service, color_service) = create_services();
-    tokio::spawn(start_app(subtitle_service, color_service, listener));
+    let (subtitle_service, color_service, midi_service) = create_services();
+    tokio::spawn(start_app(subtitle_service, color_service, midi_service, listener));
     fake_client.start().await;
     fake_client
         .send(SubscriberMessage::Subscribe(Service::Subtitle))
@@ -99,8 +104,8 @@ async fn test_new_client_tries_to_subscribe_without_registering() {
 async fn test_new_client_subscribes_to_subtitles() {
     let (listener, url) = start_tcp_stream().await;
     let mut fake_client: FakeSubscriber = FakeSubscriber::new(url, RelativeLocation::Center).await;
-    let (subtitle_service, color_service) = create_services();
-    tokio::spawn(start_app(subtitle_service, color_service, listener));
+    let (subtitle_service, color_service, midi_service) = create_services();
+    tokio::spawn(start_app(subtitle_service, color_service, midi_service, listener));
     fake_client.start().await;
     fake_client.register().await;
     let result = fake_client.recv().await.unwrap();
@@ -122,8 +127,8 @@ async fn test_new_client_subscribes_to_subtitles() {
 async fn test_new_client_subscribes_to_color() {
     let (listener, url) = start_tcp_stream().await;
     let mut fake_client: FakeSubscriber = FakeSubscriber::new(url, RelativeLocation::Center).await;
-    let (subtitle_service, color_service) = create_services();
-    tokio::spawn(start_app(subtitle_service, color_service, listener));
+    let (subtitle_service, color_service, midi_service) = create_services();
+    tokio::spawn(start_app(subtitle_service, color_service, midi_service, listener));
     fake_client.start().await;
     fake_client.register().await;
     let result = fake_client.recv().await.unwrap();
@@ -161,9 +166,9 @@ async fn test_several_clients_connect_and_register() {
         fake_client_4_right,
         fake_client_5_center,
     ];
-    let (subtitle_service, color_service) = create_services();
+    let (subtitle_service, color_service, midi_service) = create_services();
 
-    tokio::spawn(start_app(subtitle_service, color_service, listener));
+    tokio::spawn(start_app(subtitle_service, color_service, midi_service, listener));
     let list_fake_clients = join_all(list_fake_clients.into_iter().map(|mut client| async move {
         client.start().await;
         client.register().await;
@@ -201,9 +206,9 @@ async fn test_several_clients_subscribe_to_color_different_locations_gets_differ
         fake_client_4_right,
         fake_client_5_center,
     ];
-    let (subtitle_service, color_service) = create_services();
+    let (subtitle_service, color_service, midi_service) = create_services();
     let color_service_sender = color_service.sender.clone();
-    tokio::spawn(start_app(subtitle_service, color_service, listener));
+    tokio::spawn(start_app(subtitle_service, color_service, midi_service, listener));
     let list_fake_clients = join_all(list_fake_clients.into_iter().map(|mut client| async move {
         client.start().await;
         client.register().await;

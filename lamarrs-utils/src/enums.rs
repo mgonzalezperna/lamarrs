@@ -156,6 +156,7 @@ impl std::fmt::Display for CloseConnectionReason {
 pub enum Service {
     Subtitle,
     Color,
+    Midi,
 }
 
 impl std::fmt::Display for Service {
@@ -163,6 +164,7 @@ impl std::fmt::Display for Service {
         let value = match self {
             Self::Subtitle => "Subtitle",
             Self::Color => "Color",
+            Self::Midi=> "Midi",
         };
         write!(f, "{}", value)
     }
