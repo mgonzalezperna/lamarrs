@@ -1,0 +1,7 @@
+[profile.tiny]
+inherits = "release"
+strip = true
+opt-level = "z"
+lto = true
+panic = 'abort'
+codegen-units = 1

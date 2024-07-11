@@ -1,4 +1,7 @@
-use dioxus::signals::{Signal, Writable};
+use dioxus::{
+    hooks::Coroutine,
+    signals::{Signal, Writable},
+};
 use futures::{
     channel::mpsc::{Receiver, Sender},
     SinkExt, StreamExt,
@@ -8,12 +11,18 @@ use reqwasm::websocket::{futures::WebSocket, Message};
 
 use wasm_bindgen_futures::spawn_local;
 
+use crate::midi_processor;
+
 pub struct WebsocketService {
     pub sender: Sender<SubscriberMessage>,
 }
 
 impl WebsocketService {
-    pub fn new(mut bg: Signal<String>, mut subs: Signal<String>) -> Self {
+    pub fn new(
+        mut bg: Signal<String>,
+        mut subs: Signal<String>,
+        mut sound_engine: Coroutine<i32>,
+    ) -> Self {
         let ws = WebSocket::open("ws://127.0.0.1:8080").unwrap();
 
         let (mut outgoing, mut incoming) = ws.split();
@@ -47,6 +56,12 @@ impl WebsocketService {
                                 }
                                 Ok(GatewayMessage::Color(color)) => {
                                     log::info!("Request change of Color by Gateway: {}", color);
+                                    match &color {
+                                        lamarrs_utils::enums::Color::Red => sound_engine.send(60),
+                                        lamarrs_utils::enums::Color::Blue => sound_engine.send(65),
+                                        lamarrs_utils::enums::Color::White => sound_engine.send(70),
+                                        lamarrs_utils::enums::Color::Black => sound_engine.send(75),
+                                    }
                                     bg.set(color.to_string());
                                 }
                                 Err(_) => todo!(),
