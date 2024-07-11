@@ -1,4 +1,7 @@
-use dioxus::{hooks::Coroutine, signals::{Signal, Writable}};
+use dioxus::{
+    hooks::Coroutine,
+    signals::{Signal, Writable},
+};
 use futures::{
     channel::mpsc::{Receiver, Sender},
     SinkExt, StreamExt,
@@ -15,7 +18,11 @@ pub struct WebsocketService {
 }
 
 impl WebsocketService {
-    pub fn new(mut bg: Signal<String>, mut subs: Signal<String>, mut sound_engine: Coroutine<i32>) -> Self {
+    pub fn new(
+        mut bg: Signal<String>,
+        mut subs: Signal<String>,
+        mut sound_engine: Coroutine<i32>,
+    ) -> Self {
         let ws = WebSocket::open("ws://127.0.0.1:8080").unwrap();
 
         let (mut outgoing, mut incoming) = ws.split();

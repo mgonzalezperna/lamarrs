@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
-pub mod websocket;
 pub mod midi_processor;
+pub mod websocket;
 
 use dioxus::prelude::*;
 use futures_util::StreamExt;
@@ -25,8 +25,8 @@ fn App() -> Element {
     let background_color = use_signal(|| String::from("red"));
     let subtitle = use_signal(|| String::from(""));
     let sound_engine: Coroutine<i32> = use_coroutine(|mut rx: UnboundedReceiver<i32>| async move {
-        let mut sound_handler : Option<midi_processor::Handle> = None;
-        loop{
+        let mut sound_handler: Option<midi_processor::Handle> = None;
+        loop {
             while let Some(midi_event) = rx.next().await {
                 match sound_handler {
                     None => {
@@ -59,7 +59,8 @@ fn App() -> Element {
     });
     let ws: Coroutine<SubscriberMessage> =
         use_coroutine(|mut rx: UnboundedReceiver<SubscriberMessage>| async move {
-            let mut conn = websocket::WebsocketService::new(background_color, subtitle, sound_engine);
+            let mut conn =
+                websocket::WebsocketService::new(background_color, subtitle, sound_engine);
             let register = conn
                 .sender
                 .try_send(SubscriberMessage::Register((uuid, location.read().clone())));
