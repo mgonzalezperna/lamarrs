@@ -1,8 +1,11 @@
 // Collection of messages types to be send via websockets.
 
-use std::{fmt, path::Display, str::FromStr, string::ParseError};
+use std::{fmt, str::FromStr, string::ParseError};
 
-use crate::enums::{Color, RelativeLocation, Service};
+use crate::{
+    enums::{Color, RelativeLocation, Service},
+    midi_event::MidiEvent,
+};
 use arrayvec::ArrayString;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -46,5 +49,11 @@ pub struct SendSubtitle {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SendColor {
     pub color: Color,
+    pub target_location: RelativeLocation,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct SendMidiEvent {
+    pub event: MidiEvent,
     pub target_location: RelativeLocation,
 }
