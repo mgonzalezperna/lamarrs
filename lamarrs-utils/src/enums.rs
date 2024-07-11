@@ -1,4 +1,5 @@
 use crate::messages::*;
+use crate::midi_event::MidiEvent;
 use serde::{Deserialize, Serialize};
 use strum_macros::EnumIter;
 use thiserror::Error;
@@ -37,6 +38,7 @@ pub enum GatewayMessage {
     SubscribeResult(SubscribeResult),
     Subtitle(Subtitle),
     Color(Color),
+    Midi(MidiEvent),
     Error(GatewayError),
 }
 
@@ -48,6 +50,7 @@ impl std::fmt::Display for GatewayMessage {
             Self::SubscribeResult(inner) => serde_json::to_value(inner).unwrap(),
             Self::Subtitle(inner) => serde_json::to_value(inner).unwrap(),
             Self::Color(inner) => serde_json::to_value(inner).unwrap(),
+            Self::Midi(inner) => serde_json::to_value(inner).unwrap(),
             Self::Error(inner) => serde_json::to_value(inner).unwrap(),
         };
         write!(f, "{}", value)
