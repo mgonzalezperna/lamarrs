@@ -5,9 +5,8 @@ pub mod websocket;
 
 use dioxus::prelude::*;
 use futures_util::StreamExt;
-use lamarrs_utils::enums::{RelativeLocation, Service, SubscriberMessage};
+use lamarrs_utils::{enums::{RelativeLocation, Service, SubscriberMessage}, midi_event::{self, MidiEvent}};
 use log::{debug, error, info};
-use oxisynth::MidiEvent;
 use tracing::field::debug;
 use uuid::Uuid;
 const _TAILWIND_URL: &str = manganis::mg!(file("dist/tailwind.css"));
@@ -24,36 +23,23 @@ fn App() -> Element {
     let mut location = use_signal(|| RelativeLocation::Center);
     let background_color = use_signal(|| String::from("red"));
     let subtitle = use_signal(|| String::from(""));
-    let sound_engine: Coroutine<i32> = use_coroutine(|mut rx: UnboundedReceiver<i32>| async move {
+    let sound_engine: Coroutine<MidiEvent> = use_coroutine(|mut rx: UnboundedReceiver<MidiEvent>| async move {
         let mut sound_handler: Option<midi_processor::Handle> = None;
         loop {
             while let Some(midi_event) = rx.next().await {
-                match sound_handler {
+                if let MidiEvent::SystemReset = midi_event {
+                   sound_handler = Some(midi_processor::create_handler());
+                }
+                match &sound_handler {
+                    Some(handler) =>{
+                        debug!("Playing note");
+                        handler.send(midi_event);
+                    },
                     None => {
-                        if midi_event == 0 {
-                            debug!("Creating sound context");
-                            sound_handler = Some(midi_processor::beep());
-                        } else {
-                            panic!("No sound handler yet!");
-                        }
+                        error!("No sound context! MidiEvent can't be processed");
+                        break;
                     }
-                    _ => {
-                        debug!("playing note?");
-                        midi_processor::noteOn(sound_handler.as_mut().unwrap(), midi_event)
-                    }
-                };
-                //match midi_event {
-                //    MidiEvent::NoteOn { channel, key, vel } => todo!(),
-                //    MidiEvent::NoteOff { channel, key } => todo!(),
-                //    MidiEvent::ControlChange { channel, ctrl, value } => todo!(),
-                //    MidiEvent::AllNotesOff { channel } => todo!(),
-                //    MidiEvent::AllSoundOff { channel } => todo!(),
-                //    MidiEvent::PitchBend { channel, value } => todo!(),
-                //    MidiEvent::ProgramChange { channel, program_id } => todo!(),
-                //    MidiEvent::ChannelPressure { channel, value } => todo!(),
-                //    MidiEvent::PolyphonicKeyPressure { channel, key, value } => todo!(),
-                //    MidiEvent::SystemReset => todo!(),
-                //}
+                }
             }
         }
     });
@@ -80,7 +66,7 @@ fn App() -> Element {
             class: "w-full h-screen flex items-center justify-center",
             ul {
                 class:"list-inside",
-                // Button component, idk how to place it out of here because the ws used of the onchange event can't be passed as an argument, defeating the entire concept of this framework from hell.
+                // Subtitles button component, idk how to place it out of here because the ws used of the onchange event can't be passed as an argument, defeating the entire concept of this framework from hell.
                 label {
                     class:"flex items-center relative w-max cursor-pointer select-none text-right",
                     span {
@@ -118,7 +104,7 @@ fn App() -> Element {
                     class: "h-5"
                 }
 
-                // Another button
+                // Color button
                 label {
                     class:"flex items-center relative w-max cursor-pointer select-none text-right",
                     span {
@@ -138,7 +124,47 @@ fn App() -> Element {
                         r#type: "checkbox",
                         onchange: move |_| {
                             ws.send(SubscriberMessage::Subscribe(Service::Color));
-                            sound_engine.send(0);
+                        }
+                    }
+                    span {
+                        class: "absolute font-medium text-xs uppercase right-1 text-white",
+                        "OFF"
+                    }
+                    span {
+                        class:"absolute font-medium text-xs uppercase right-8 text-white",
+                        "ON"
+                    }
+                    span {
+                        class:"w-7 h-7 right-7 absolute rounded-full transform transition-transform bg-gray-200 peer-checked:translate-x-7",
+                    }
+                }
+
+                // Spacer
+                div{
+                    class: "h-5"
+                }
+
+                // Sound button
+                label {
+                    class:"flex items-center relative w-max cursor-pointer select-none text-right",
+                    span {
+                        class:"text-lg font-bold mr-3 text-white forced-color-adjust-auto",
+                        "Subscription  ",
+                        span {
+                            class: "before:block before:absolute before:-inset-1 before:-skew-y-3 before:bg-cyan-500 relative inline-block",
+                            span{
+                                class: "relative text-white",
+                                "MIDI"
+                            }
+                        }
+                        "  Service"
+                    }
+                    input {
+                        class: "appearance-none transition-colors cursor-pointer w-14 h-7 rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-black focus:ring-blue-500 bg-red-500 checked:bg-green-500 peer",
+                        r#type: "checkbox",
+                        onchange: move |_| {
+                            ws.send(SubscriberMessage::Subscribe(Service::Midi));
+                            sound_engine.send(MidiEvent::SystemReset)
                         }
                     }
                     span {
@@ -158,7 +184,6 @@ fn App() -> Element {
                 div{
                     class: "h-20"
                 }
-
 
                 fieldset {
                     class:"grid grid-cols-3 gap-2 rounded-xl bg-coral-200 text-lg font-bold mr-3 text-white forced-color-adjust-auto",
