@@ -65,6 +65,7 @@ async fn main() -> Result<(), ServerError> {
     let mut mqtt_interface = MqttInterface::new(
         subtitle_service.sender.clone(),
         color_service.sender.clone(),
+        midi_service.sender.clone(),
     );
     let ws_factory = SubscriberBuilder::new(
         subtitle_service.sender.clone(),

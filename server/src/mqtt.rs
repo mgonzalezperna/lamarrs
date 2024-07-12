@@ -7,6 +7,7 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::{task, time};
 use tracing::{debug, error, instrument};
 
+use crate::services::sound_streamers::MidiMessage;
 use crate::services::text_streamers::{ColorMessage, SubtitleMessage};
 
 pub struct MqttInterface {
@@ -14,6 +15,7 @@ pub struct MqttInterface {
     receiver: Receiver<GatewayMessage>,
     subtitles: Sender<SubtitleMessage>,
     color: Sender<ColorMessage>,
+    midi: Sender<MidiMessage>,
 
     mqtt_sender: AsyncClient,
     mqtt_receiver: EventLoop,
@@ -21,7 +23,7 @@ pub struct MqttInterface {
 
 impl MqttInterface {
     #[instrument(name = "MqttInterface::new", level = "INFO")]
-    pub fn new(subtitles: Sender<SubtitleMessage>, color: Sender<ColorMessage>) -> Self {
+    pub fn new(subtitles: Sender<SubtitleMessage>, color: Sender<ColorMessage>, midi: Sender<MidiMessage>) -> Self {
         let (sender, receiver) = channel(32);
         let host = "localhost";
         let port: u16 = 1883;
@@ -35,6 +37,7 @@ impl MqttInterface {
             receiver,
             subtitles,
             color,
+            midi,
             mqtt_sender,
             mqtt_receiver,
         }
@@ -80,6 +83,11 @@ impl MqttInterface {
                 OrchestratorMessage::SendColor(color_with_target) => {
                     self.color
                         .send(ColorMessage::SendColor(color_with_target))
+                        .await;
+                }
+                OrchestratorMessage::SendMidi(event_with_target) => {
+                    self.midi
+                        .send(MidiMessage::SendMidi(event_with_target))
                         .await;
                 }
                 OrchestratorMessage::Error(_) => todo!(),

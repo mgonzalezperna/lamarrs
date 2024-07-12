@@ -274,7 +274,7 @@ impl Subscriber {
                             .await?;
                         Ok(())
                     }
-                    Service::Midi=> {
+                    Service::Midi => {
                         self.midi
                             .send(MidiMessage::Subscribe(SusbcriptionData {
                                 sender_id: self.id.uuid.unwrap(),
@@ -298,6 +298,13 @@ impl Subscriber {
                     .await?;
                 self.color
                     .send(ColorMessage::UpdateSubscription(SusbcriptionData {
+                        sender_id: self.id.uuid.unwrap(),
+                        sender: self.sender.clone(),
+                        location: self.id.location.clone().unwrap(),
+                    }))
+                    .await?;
+                self.midi
+                    .send(MidiMessage::UpdateSubscription(SusbcriptionData {
                         sender_id: self.id.uuid.unwrap(),
                         sender: self.sender.clone(),
                         location: self.id.location.clone().unwrap(),
@@ -342,6 +349,14 @@ impl Subscriber {
                 location: self.id.location.clone().unwrap(),
             }))
             .await;
+        self.midi
+            .send(MidiMessage::UpdateSubscription(SusbcriptionData {
+                sender_id: self.id.uuid.unwrap(),
+                sender: self.sender.clone(),
+                location: self.id.location.clone().unwrap(),
+            }))
+            .await;
+
 
         Ok(inbox)
     }

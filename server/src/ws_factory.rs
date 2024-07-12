@@ -15,12 +15,20 @@ pub enum ConnManagerError {
 pub struct SubscriberBuilder {
     subtitle: Sender<SubtitleMessage>,
     color: Sender<ColorMessage>,
-    midi: Sender<MidiMessage>
+    midi: Sender<MidiMessage>,
 }
 
 impl SubscriberBuilder {
-    pub fn new(subtitle: Sender<SubtitleMessage>, color: Sender<ColorMessage>, midi: Sender<MidiMessage>) -> Self {
-        Self { subtitle, color, midi }
+    pub fn new(
+        subtitle: Sender<SubtitleMessage>,
+        color: Sender<ColorMessage>,
+        midi: Sender<MidiMessage>,
+    ) -> Self {
+        Self {
+            subtitle,
+            color,
+            midi,
+        }
     }
 
     pub async fn run(self, listener: TcpListener) {
@@ -28,8 +36,12 @@ impl SubscriberBuilder {
             match listener.accept().await {
                 Ok((stream, addr)) => {
                     tokio::spawn({
-                        let mut new_subscriber =
-                            Subscriber::new(self.subtitle.clone(), self.color.clone(), self.midi.clone(), addr);
+                        let mut new_subscriber = Subscriber::new(
+                            self.subtitle.clone(),
+                            self.color.clone(),
+                            self.midi.clone(),
+                            addr,
+                        );
                         async move {
                             new_subscriber.run(stream).await;
                         }
