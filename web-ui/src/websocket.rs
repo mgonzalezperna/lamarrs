@@ -6,7 +6,7 @@ use futures::{
     channel::mpsc::{Receiver, Sender},
     SinkExt, StreamExt,
 };
-use lamarrs_utils::enums::{GatewayError, GatewayMessage, SubscriberMessage};
+use lamarrs_utils::{enums::{GatewayError, GatewayMessage, SubscriberMessage}, midi_event::MidiEvent};
 use reqwasm::websocket::{futures::WebSocket, Message};
 
 use wasm_bindgen_futures::spawn_local;
@@ -21,7 +21,7 @@ impl WebsocketService {
     pub fn new(
         mut bg: Signal<String>,
         mut subs: Signal<String>,
-        mut sound_engine: Coroutine<i32>,
+        mut sound_engine: Coroutine<MidiEvent>,
     ) -> Self {
         let ws = WebSocket::open("ws://127.0.0.1:8080").unwrap();
 
@@ -56,13 +56,11 @@ impl WebsocketService {
                                 }
                                 Ok(GatewayMessage::Color(color)) => {
                                     log::info!("Request change of Color by Gateway: {}", color);
-                                    match &color {
-                                        lamarrs_utils::enums::Color::Red => sound_engine.send(60),
-                                        lamarrs_utils::enums::Color::Blue => sound_engine.send(65),
-                                        lamarrs_utils::enums::Color::White => sound_engine.send(70),
-                                        lamarrs_utils::enums::Color::Black => sound_engine.send(75),
-                                    }
                                     bg.set(color.to_string());
+                                }
+                                Ok(GatewayMessage::Midi(midi_event)) => {
+                                    log::info!("Midi Event received: {}", midi_event);
+                                    sound_engine.send(midi_event)
                                 }
                                 Err(_) => todo!(),
                                 _ => {
