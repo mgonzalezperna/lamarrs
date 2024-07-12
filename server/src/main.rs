@@ -9,6 +9,7 @@ mod ws_factory;
 use crate::services::text_streamers::SubtitlesStreamer;
 use crate::ws_factory::SubscriberBuilder;
 use mqtt::MqttInterface;
+use services::sound_streamers::MidiStreamer;
 use services::text_streamers::ColorStreamer;
 use tokio::net::TcpListener;
 use tracing::{debug, error, info};
@@ -20,8 +21,12 @@ pub enum ServerError {
     Error(#[from] io::Error),
     #[error("The message has to be a valid UTF8 string.")]
     FromUtf8Error(#[from] std::string::FromUtf8Error),
-    #[error("There was a irrecoverable error initialising the TextService.")]
-    TextServiceError,
+    #[error("There was a irrecoverable error initialising the SubtitlesService.")]
+    SubtitleServiceError,
+    #[error("There was a irrecoverable error initialising the ColorService.")]
+    ColorServiceError,
+    #[error("There was a irrecoverable error initialising the MidiService.")]
+    MidiServiceError,
     #[error("There was a irrecoverable error initialising the WebSocketService.")]
     WebSocketFactoryError,
 }
@@ -56,21 +61,27 @@ async fn main() -> Result<(), ServerError> {
     println!("Listening on: {}", addr);
     let mut subtitle_service = SubtitlesStreamer::new();
     let mut color_service = ColorStreamer::new();
+    let mut midi_service = MidiStreamer::new();
     let mut mqtt_interface = MqttInterface::new(
         subtitle_service.sender.clone(),
         color_service.sender.clone(),
+        midi_service.sender.clone(),
     );
     let ws_factory = SubscriberBuilder::new(
         subtitle_service.sender.clone(),
         color_service.sender.clone(),
+        midi_service.sender.clone(),
     );
 
     tokio::select! {
         _ = subtitle_service.run() => {
-            Err(ServerError::TextServiceError)
+            Err(ServerError::SubtitleServiceError)
         }
         _ = color_service.run() => {
-            Err(ServerError::TextServiceError)
+            Err(ServerError::ColorServiceError)
+        }
+        _ = midi_service.run() => {
+            Err(ServerError::MidiServiceError)
         }
         _ = mqtt_interface.run() => {
             Err(ServerError::WebSocketFactoryError)

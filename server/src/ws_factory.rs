@@ -1,3 +1,4 @@
+use crate::services::sound_streamers::MidiMessage;
 use crate::services::text_streamers::{ColorMessage, SubtitleMessage};
 use crate::subscriber::Subscriber;
 use tokio::net::TcpListener;
@@ -14,11 +15,20 @@ pub enum ConnManagerError {
 pub struct SubscriberBuilder {
     subtitle: Sender<SubtitleMessage>,
     color: Sender<ColorMessage>,
+    midi: Sender<MidiMessage>,
 }
 
 impl SubscriberBuilder {
-    pub fn new(subtitle: Sender<SubtitleMessage>, color: Sender<ColorMessage>) -> Self {
-        Self { subtitle, color }
+    pub fn new(
+        subtitle: Sender<SubtitleMessage>,
+        color: Sender<ColorMessage>,
+        midi: Sender<MidiMessage>,
+    ) -> Self {
+        Self {
+            subtitle,
+            color,
+            midi,
+        }
     }
 
     pub async fn run(self, listener: TcpListener) {
@@ -26,8 +36,12 @@ impl SubscriberBuilder {
             match listener.accept().await {
                 Ok((stream, addr)) => {
                     tokio::spawn({
-                        let mut new_subscriber =
-                            Subscriber::new(self.subtitle.clone(), self.color.clone(), addr);
+                        let mut new_subscriber = Subscriber::new(
+                            self.subtitle.clone(),
+                            self.color.clone(),
+                            self.midi.clone(),
+                            addr,
+                        );
                         async move {
                             new_subscriber.run(stream).await;
                         }

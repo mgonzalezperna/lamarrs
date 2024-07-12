@@ -17,6 +17,7 @@ pub enum MessageError {
 pub enum OrchestratorMessage {
     SendSubtitle(SendSubtitle),
     SendColor(SendColor),
+    SendMidi(SendMidiEvent),
     Error(GatewayError),
 }
 
@@ -25,6 +26,7 @@ impl std::fmt::Display for OrchestratorMessage {
         let value = match self {
             Self::SendSubtitle(inner) => serde_json::to_value(inner).unwrap(),
             Self::SendColor(inner) => serde_json::to_value(inner).unwrap(),
+            Self::SendMidi(inner) => serde_json::to_value(inner).unwrap(),
             Self::Error(inner) => serde_json::to_value(inner).unwrap(),
         };
         write!(f, "{}", value)
@@ -156,6 +158,7 @@ impl std::fmt::Display for CloseConnectionReason {
 pub enum Service {
     Subtitle,
     Color,
+    Midi,
 }
 
 impl std::fmt::Display for Service {
@@ -163,6 +166,7 @@ impl std::fmt::Display for Service {
         let value = match self {
             Self::Subtitle => "Subtitle",
             Self::Color => "Color",
+            Self::Midi=> "Midi",
         };
         write!(f, "{}", value)
     }

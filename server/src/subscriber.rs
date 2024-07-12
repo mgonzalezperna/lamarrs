@@ -25,6 +25,7 @@ use uuid::Uuid;
 
 use crate::services;
 use crate::services::payload::SusbcriptionData;
+use crate::services::sound_streamers::MidiMessage;
 use crate::services::text_streamers::{ColorMessage, SubtitleMessage};
 
 #[derive(Debug, thiserror::Error)]
@@ -76,6 +77,7 @@ impl fmt::Display for SubscriberId {
 pub struct Subscriber {
     subtitles: Sender<SubtitleMessage>,
     color: Sender<ColorMessage>,
+    midi: Sender<MidiMessage>,
 
     id: SubscriberId,
     sender: Sender<GatewayMessage>,
@@ -88,6 +90,7 @@ impl Subscriber {
     pub fn new(
         subtitles: Sender<SubtitleMessage>,
         color: Sender<ColorMessage>,
+        midi: Sender<MidiMessage>,
         addr: SocketAddr,
     ) -> Self {
         info!("New subscriber is being created: {}", addr);
@@ -96,6 +99,7 @@ impl Subscriber {
         Self {
             subtitles,
             color,
+            midi,
             id: subscriber_id,
             sender,
             inbox,
@@ -270,6 +274,16 @@ impl Subscriber {
                             .await?;
                         Ok(())
                     }
+                    Service::Midi => {
+                        self.midi
+                            .send(MidiMessage::Subscribe(SusbcriptionData {
+                                sender_id: self.id.uuid.unwrap(),
+                                sender: self.sender.clone(),
+                                location: self.id.location.clone().unwrap(),
+                            }))
+                            .await?;
+                        Ok(())
+                    }
                 }
             }
             Ok(SubscriberMessage::UpdateLocation(new_location)) => {
@@ -284,6 +298,13 @@ impl Subscriber {
                     .await?;
                 self.color
                     .send(ColorMessage::UpdateSubscription(SusbcriptionData {
+                        sender_id: self.id.uuid.unwrap(),
+                        sender: self.sender.clone(),
+                        location: self.id.location.clone().unwrap(),
+                    }))
+                    .await?;
+                self.midi
+                    .send(MidiMessage::UpdateSubscription(SusbcriptionData {
                         sender_id: self.id.uuid.unwrap(),
                         sender: self.sender.clone(),
                         location: self.id.location.clone().unwrap(),
@@ -328,6 +349,14 @@ impl Subscriber {
                 location: self.id.location.clone().unwrap(),
             }))
             .await;
+        self.midi
+            .send(MidiMessage::UpdateSubscription(SusbcriptionData {
+                sender_id: self.id.uuid.unwrap(),
+                sender: self.sender.clone(),
+                location: self.id.location.clone().unwrap(),
+            }))
+            .await;
+
 
         Ok(inbox)
     }
@@ -358,4 +387,6 @@ pub enum InternalError {
     SubtitlesMessageSendError(#[from] SendError<services::text_streamers::SubtitleMessage>),
     #[error("Error sending message to Color Actor: {0}")]
     ColorMessageSendError(#[from] SendError<services::text_streamers::ColorMessage>),
+    #[error("Error sending message to MIDI Actor: {0}")]
+    MidiMessageSendError(#[from] SendError<services::sound_streamers::MidiMessage>),
 }

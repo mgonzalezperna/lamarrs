@@ -1,5 +1,7 @@
 // Hack because MidiEvent doesn't implement Debug. That lib needs some love...
 
+use std::path::Display;
+
 use oxisynth::{SoundFont, TypedIndex};
 use serde::{Deserialize, Serialize};
 
@@ -59,6 +61,51 @@ pub enum MidiEvent {
     /// Purpose:
     /// Respond to the MIDI command 'system reset' (0xFF, big red 'panic' button)
     SystemReset,
+}
+
+impl std::fmt::Display for MidiEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let value = serde_json::to_value(self).unwrap();
+        write!(f, "{}", value)
+    }
+}
+
+impl TryFrom<oxisynth::MidiEvent> for MidiEvent {
+    type Error = &'static str;
+
+    fn try_from(value: oxisynth::MidiEvent) -> Result<Self, Self::Error> {
+        match value {
+            oxisynth::MidiEvent::NoteOn { channel, key, vel } => Ok(MidiEvent::NoteOn { channel, key, vel }),
+            oxisynth::MidiEvent::NoteOff { channel, key } => Ok(MidiEvent::NoteOff { channel, key }),
+            oxisynth::MidiEvent::ControlChange { channel, ctrl, value } => Ok(MidiEvent::ControlChange { channel, ctrl, value }),
+            oxisynth::MidiEvent::AllNotesOff { channel } => Ok(MidiEvent::AllNotesOff { channel }),
+            oxisynth::MidiEvent::AllSoundOff { channel } => Ok(MidiEvent::AllNotesOff { channel }),
+            oxisynth::MidiEvent::PitchBend { channel, value } => Ok(MidiEvent::PitchBend { channel, value }),
+            oxisynth::MidiEvent::ProgramChange { channel, program_id } => Ok(MidiEvent::ProgramChange { channel, program_id }),
+            oxisynth::MidiEvent::ChannelPressure { channel, value } => Ok(MidiEvent::ChannelPressure { channel, value }),
+            oxisynth::MidiEvent::PolyphonicKeyPressure { channel, key, value } => Ok(MidiEvent::PolyphonicKeyPressure { channel, key, value }),
+            oxisynth::MidiEvent::SystemReset => Ok(MidiEvent::SystemReset),
+        }
+    }
+}
+
+impl TryFrom<MidiEvent> for oxisynth::MidiEvent {
+    type Error = &'static str;
+
+    fn try_from(value: MidiEvent) -> Result<Self, Self::Error> {
+        match value {
+            MidiEvent::NoteOn { channel, key, vel } => Ok(oxisynth::MidiEvent::NoteOn { channel, key, vel }),
+            MidiEvent::NoteOff { channel, key } => Ok(oxisynth::MidiEvent::NoteOff { channel, key }),
+            MidiEvent::ControlChange { channel, ctrl, value } => Ok(oxisynth::MidiEvent::ControlChange { channel, ctrl, value }),
+            MidiEvent::AllNotesOff { channel } => Ok(oxisynth::MidiEvent::AllNotesOff { channel }),
+            MidiEvent::AllSoundOff { channel } => Ok(oxisynth::MidiEvent::AllNotesOff { channel }),
+            MidiEvent::PitchBend { channel, value } => Ok(oxisynth::MidiEvent::PitchBend { channel, value }),
+            MidiEvent::ProgramChange { channel, program_id } => Ok(oxisynth::MidiEvent::ProgramChange { channel, program_id }),
+            MidiEvent::ChannelPressure { channel, value } => Ok(oxisynth::MidiEvent::ChannelPressure { channel, value }),
+            MidiEvent::PolyphonicKeyPressure { channel, key, value } => Ok(oxisynth::MidiEvent::PolyphonicKeyPressure { channel, key, value }),
+            MidiEvent::SystemReset => Ok(oxisynth::MidiEvent::SystemReset),
+        }
+    }
 }
 
 impl MidiEvent {
