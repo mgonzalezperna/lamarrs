@@ -8,7 +8,7 @@ use inquire::{CustomType, InquireError, Select};
 use lamarrs_utils::{
     enums::{Color, OrchestratorMessage, RelativeLocation, Service},
     error,
-    messages::{SendColor, SendSubtitle, Subtitle},
+    messages::{SendColor, SendMidiEvent, SendSubtitle, Subtitle}, midi_event::MidiEvent,
 };
 use lipsum::lipsum_words_with_rng;
 use rand::seq::SliceRandom;
@@ -49,6 +49,9 @@ fn main() {
     let mode: Vec<&str> = vec!["Loop", "Single Message"];
     let services: Vec<Service> = Service::iter().collect::<Vec<_>>();
     let locations: Vec<RelativeLocation> = RelativeLocation::iter().collect::<Vec<_>>();
+    let midi_channel: Vec<u8> = (0..15).collect();
+    let midi_key: Vec<u8> = (30..90).collect();
+    let midi_vel: Vec<u8> = (80..100).collect();
 
     if Select::new("Select mode for the orchestrator", mode)
         .prompt()
@@ -75,12 +78,20 @@ fn main() {
                         .to_owned(),
                     target_location: rnd_location.to_owned(),
                 }),
+                Service::Midi => OrchestratorMessage::SendMidi(SendMidiEvent{
+                    event: MidiEvent::NoteOn {
+                        channel: 0, //*midi_channel.choose(&mut rand::thread_rng()).unwrap(), 
+                        key: *midi_key.choose(&mut rand::thread_rng()).unwrap(),
+                        vel: *midi_vel.choose(&mut rand::thread_rng()).unwrap(),
+                    },
+                    target_location: rnd_location.to_owned(),
+                })
             };
             send_to_mqtt(mqtt_sender.clone(), orchestrator_message);
             while let Some(Ok(notification)) = mqtt_receiver.iter().next() {
                 info!("MQTT results= {:?}", notification);
             }
-            let ten_millis = time::Duration::from_secs(1);
+            let ten_millis = time::Duration::from_millis(200);
             thread::sleep(ten_millis);
         }
     }
@@ -97,6 +108,7 @@ fn main() {
     let orchestrator_message: OrchestratorMessage = match selected_service {
         Ok(Service::Subtitle) => on_subtitle(target_location.unwrap()),
         Ok(Service::Color) => on_color(target_location.unwrap()),
+        Ok(Service::Midi) => on_midi(target_location.unwrap()),
         Err(_) => panic!("There was an error, please try again"),
     };
     send_to_mqtt(mqtt_sender, orchestrator_message);
@@ -125,7 +137,7 @@ fn on_subtitle(target_location: RelativeLocation) -> OrchestratorMessage {
 fn on_color(target_location: RelativeLocation) -> OrchestratorMessage {
     let colors: Vec<Color> = Color::iter().collect::<Vec<_>>();
     let selected_color: Result<Color, InquireError> =
-        Select::new("What's the target location", colors).prompt();
+        Select::new("Color to be sent:", colors).prompt();
 
     match selected_color {
         Ok(color) => OrchestratorMessage::SendColor(SendColor {
@@ -133,6 +145,28 @@ fn on_color(target_location: RelativeLocation) -> OrchestratorMessage {
             target_location,
         }),
         Err(_) => panic! {"There was an error building the color message to be sent"},
+    }
+}
+
+#[instrument(name = "Orchestrator::on_color", level = "INFO", ret)]
+fn on_midi(target_location: RelativeLocation) -> OrchestratorMessage {
+    let midi_channel: Vec<u8> = (0..15).collect();
+    let midi_key: Vec<u8> = (0..127).collect();
+    let midi_vel: Vec<u8> = (0..100).collect();
+    let selected_channel: Result<u8, InquireError> =
+        Select::new("MIDI Channel targetted:", midi_channel).prompt();
+    let selected_key: Result<u8, InquireError> =
+        Select::new("MIDI note:", midi_key).prompt();
+    let selected_vel: Result<u8, InquireError> =
+        Select::new("MIDI velocity:", midi_vel).prompt();
+
+
+    match (selected_channel, selected_key, selected_vel) {
+        (Ok(channel), Ok(key), Ok(vel)) => OrchestratorMessage::SendMidi(SendMidiEvent {
+            event: MidiEvent::NoteOn { channel, key, vel },
+            target_location,
+        }),
+        _ => panic! {"There was an error building the MIDI message to be sent"},
     }
 }
 
