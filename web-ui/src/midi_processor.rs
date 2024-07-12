@@ -1,33 +1,25 @@
 use tracing::error;
 use wasm_bindgen::prelude::*;
 
+use lamarrs_utils::midi_event::MidiEvent;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SizedSample, Stream};
-use oxisynth::MidiEvent;
 use std::sync::mpsc::{Receiver, Sender};
-
-#[wasm_bindgen]
-pub struct Handle(Stream, Sender<MidiEvent>);
-
-impl Handle {
-    fn note_on(&mut self, channel: u8, key: u8, vel: u8) {
-        self.1.send(MidiEvent::NoteOn { channel, key, vel }).ok();
-    }
-    fn note_off(&mut self, channel: u8, key: u8) {
-        self.1.send(MidiEvent::NoteOff { channel, key }).ok();
-    }
-}
 
 #[wasm_bindgen]
 pub struct Synth(oxisynth::Synth);
 
 #[wasm_bindgen]
-pub fn noteOn(h: &mut Handle, note: i32) {
-    h.note_on(0, note as _, 100);
+pub struct Handle(Stream, Sender<MidiEvent>);
+
+impl Handle {
+    pub fn send(&self, event: MidiEvent) {
+        self.1.send(event);
+    }
 }
 
 #[wasm_bindgen]
-pub fn beep() -> Handle {
+pub fn create_handler() -> Handle {
     let host = cpal::default_host();
     let device = host
         .default_output_device()
@@ -77,7 +69,8 @@ where
     let mut next_value = move || {
         let (l, r) = synth.read_next();
 
-        if let Ok(e) = rx.try_recv() {
+        if let Ok(midi_event) = rx.try_recv() {
+            let e = MidiEvent::try_into(midi_event).expect("Fatal error on MidiEvent processing");
             synth.send_event(e).ok();
         }
 
