@@ -1,0 +1,66 @@
+[package]
+name = "lamarrs-rp-client"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+embassy-embedded-hal = { version = "0.5.0", features = ["defmt"] }
+embassy-sync = { version = "0.7.2", features = ["defmt"] }
+embassy-executor = { version = "0.9.0", features = ["arch-cortex-m", "executor-thread", "executor-interrupt", "defmt"] }
+embassy-time = { version = "0.5.0", features = ["defmt", "defmt-timestamp-uptime"] }
+embassy-rp = { version = "0.8.0", features = ["defmt", "unstable-pac", "time-driver", "critical-section-impl", "rp2040"] }
+embassy-net = { version = "0.7.1", features = ["defmt", "icmp", "tcp", "udp", "raw", "dhcpv4", "medium-ethernet", "dns", "proto-ipv4", "proto-ipv6", "multicast"] }
+embassy-net-wiznet = { version = "0.2.1", features = ["defmt"] }
+embassy-futures = { version = "0.1.2" }
+cyw43 = { version = "0.5.0", features = ["defmt", "firmware-logs"] }
+cyw43-pio = { version = "0.8.0", features = ["defmt"] }
+
+defmt = "1.0.1"
+defmt-rtt = "1.0.0"
+fixed = "1.23.1"
+fixed-macro = "1.2"
+
+# for web request example
+reqwless = { version = "0.13.0", features = ["defmt"] }
+serde = { version = "1.0.203", default-features = false, features = ["derive"] }
+serde-json-core = "0.6.0"
+
+#cortex-m = { version = "0.7.6", features = ["critical-section-single-core"] }
+cortex-m = { version = "0.7.6", features = ["inline-asm"] }
+cortex-m-rt = "0.7.0"
+critical-section = "1.1"
+panic-probe = { version = "1.0.0", features = ["print-defmt"] }
+display-interface-spi = "0.5.0"
+embedded-graphics = "0.8.1"
+mipidsi = "0.9.0"
+display-interface = "0.5.0"
+byte-slice-cast = { version = "1.2.0", default-features = false }
+smart-leds = "0.4.0"
+heapless = { version = "0.9.1", features = ["defmt"] }
+
+embedded-hal-1 = { package = "embedded-hal", version = "1.0" }
+embedded-hal-async = "1.0"
+embedded-hal-bus = { version = "0.3.0", features = ["async"] }
+embedded-io-async = { version = "0.7.0", features = ["defmt"] }
+embedded-storage = { version = "0.3" }
+static_cell = "2.1"
+portable-atomic = { version = "1.5", features = ["critical-section"] }
+log = "0.4"
+ssd1306 = "0.10.0"
+itoa = "1.0.15"
+base64ct = "1.8.0"
+sha1 = { version = "0.10", default-features = false }
+uuid = { version = "1.18.1", default-features = false}
+clippy = "0.0.302"
+
+
+[profile.release]
+# Enable generation of debug symbols even on release builds
+debug = true
+
+[package.metadata.embassy]
+build = [
+  { target = "thumbv6m-none-eabi" }
+]
