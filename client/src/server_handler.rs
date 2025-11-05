@@ -2,7 +2,7 @@ use async_time_mock_tokio::MockableClock;
 use futures_util::{stream::SplitSink, SinkExt, StreamExt};
 use http::Uri;
 use lamarrs_utils::{
-    action_messages::{ActionMessage, ServiceAction},
+    action_messages::{Event, Action},
     exchange_messages::{ExchangeMessage, NackResult},
     ClientIdAndLocation, ErrorDescription, RelativeLocation, Service,
 };
@@ -17,7 +17,7 @@ use tokio_tungstenite::{
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
-use crate::InternalActionMessageClient;
+use crate::InternalEventMessageClient;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ServerHandlerError {
@@ -32,19 +32,19 @@ pub enum ServerHandlerError {
     #[error("Invalid ExchangeMessage received from Server: {0}")]
     InvalidExchangeMessage(String),
     #[error("Error sending an InternalMessage to Server handler")]
-    SendInternalMessage(#[from] mpsc::error::SendError<InternalActionMessageClient>),
+    SendInternalMessage(#[from] mpsc::error::SendError<InternalEventMessageClient>),
 }
 
 pub struct Client {
     id: Uuid,
     location: Option<RelativeLocation>,
     server_address: Uri,
-    sender: Sender<InternalActionMessageClient>,
-    inbox: Receiver<InternalActionMessageClient>,
-    audio_player: Sender<InternalActionMessageClient>,
-    //dmx: Sender<ActionMessageWithSender>,
-    //led: Sender<ActionMessageWithSender>,
-    //midi: Sender<ActionMessageWithSender>,
+    sender: Sender<InternalEventMessageClient>,
+    inbox: Receiver<InternalEventMessageClient>,
+    audio_player: Sender<InternalEventMessageClient>,
+    //dmx: Sender<InternalEventMessageClient>,
+    //led: Sender<InternalEventMessageClient>,
+    //midi: Sender<InternalEventMessageClient>,
     clock: MockableClock,
 }
 
@@ -53,10 +53,10 @@ impl Client {
     pub fn new(
         location: Option<RelativeLocation>,
         server_address: Uri,
-        audio_player: Sender<InternalActionMessageClient>,
-        // dmx: Sender<ActionMessageWithSender>,
-        // led: Sender<ActionMessageWithSender>,
-        // midi: Sender<ActionMessageWithSender>,
+        audio_player: Sender<InternalEventMessageClient>,
+        // dmx: Sender<InternalEventMessageClient>,
+        // led: Sender<InternalEventMessageClient>,
+        // midi: Sender<InternalEventMessageClient>,
     ) -> Self {
         let (sender, inbox) = channel(32);
         Self {
@@ -89,7 +89,7 @@ impl Client {
         let (mut remote_sender, mut remote_inbox) = ws_stream.split();
 
         // We add to the queue the request to Register to the Server.
-        let register_message = ExchangeMessage::Request(ActionMessage::Register(
+        let register_message = ExchangeMessage::Request(Event::Register(
             ClientIdAndLocation {
                 id: self.id,
                 location: self.location.clone(),
@@ -102,7 +102,7 @@ impl Client {
         }
         /// Notify internal services that all systems are go. Services will answer with Subscribe requests.
         /// We should also process ACK, but that means refactoring the receiver. Will be done later.
-        self.audio_player.send(InternalActionMessageClient::ConnectedToServer(self.sender.clone())).await?;
+        self.audio_player.send(InternalEventMessageClient::ConnectedToServer(self.sender.clone())).await?;
         
         loop {
             tokio::select! {
@@ -130,8 +130,8 @@ impl Client {
                         /// The Server Handler will create the ExchangeMessage frames adding over the Actor internal request.
                         /// Perhaps this API could be streamlined more...
                         match message {
-                            InternalActionMessageClient::SubscribeToService(service) => {
-                                let exchange_message = ExchangeMessage::Request(ActionMessage::SuscribeToService(service, ClientIdAndLocation::new(self.id, self.location.clone())));
+                            InternalEventMessageClient::SubscribeToService(service) => {
+                                let exchange_message = ExchangeMessage::Request(Event::SuscribeToService(service, ClientIdAndLocation::new(self.id, self.location.clone())));
                                 match serde_json::to_string(&exchange_message) {
                                     Ok(string_message) => remote_sender.send(TungsteniteMessage::Text(string_message.into())).await?,
                                     Err(_) => error!("Message {:?} to be relayed to Client {:?} could not be converted to String. Message was not sent.", exchange_message, self.id)
@@ -197,10 +197,10 @@ impl Client {
         exchange_message: String,
     ) -> Result<(), ServerHandlerError> {
         match serde_json::from_str(&exchange_message) {
-            Ok(ExchangeMessage::Update(ActionMessage::UpdateClient(action))) => match action {
-                ServiceAction::NewSubtitles(subtitles) => todo!(),
-                ServiceAction::ChangeColour(colour_rgb) => todo!(),
-                ServiceAction::PlayAudio(audio_file) => Ok(self.audio_player.send(InternalActionMessageClient::PlayAudio(audio_file, self.sender.clone())).await?),
+            Ok(ExchangeMessage::Update(Event::UpdateClient(action))) => match action {
+                Action::ShowNewSubtitles(subtitles)=>todo!(),
+                Action::ChangeColour(colour_rgb)=>todo!(),
+                Action::PlayAudio(audio_file)=>Ok(self.audio_player.send(InternalEventMessageClient::PlayAudio(audio_file,self.sender.clone())).await?),
             },
             Ok(ExchangeMessage::Request(_)) => {
                 warn!(?exchange_message, "Requested Action by Server is not supported. Server may be sending Client Actions?");

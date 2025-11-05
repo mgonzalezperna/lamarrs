@@ -9,14 +9,14 @@ use rodio::StreamError;
 use tokio::sync::mpsc::{self, channel, Receiver, Sender};
 use tracing::info;
 
-use crate::InternalActionMessageClient;
+use crate::InternalEventMessageClient;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PlaybackServiceError {
     #[error("There was a irrecoverable error with the service {}.", service)]
     Service { service: String },
     #[error("Error sending an InternalMessage to Server handler")]
-    SendInternalMessage(#[from] mpsc::error::SendError<InternalActionMessageClient>),
+    SendInternalMessage(#[from] mpsc::error::SendError<InternalEventMessageClient>),
     #[error("Failed opening an audio output stream")]
     FailedOpeningOutputStream(#[from] StreamError),
     #[error("Target audio file failed to open. Path is wrong or file is corrupted.")]
@@ -27,8 +27,8 @@ pub enum PlaybackServiceError {
 
 #[derive(Debug)]
 pub struct PlaybackService {
-    pub sender: Sender<InternalActionMessageClient>,
-    receiver: Receiver<InternalActionMessageClient>,
+    pub sender: Sender<InternalEventMessageClient>,
+    receiver: Receiver<InternalEventMessageClient>,
     media_path: PathBuf,
 }
 
@@ -47,7 +47,7 @@ impl fmt::Display for PlaybackService {
 }
 
 impl PlaybackService {
-    async fn receive_message(&mut self) -> Option<InternalActionMessageClient> {
+    async fn receive_message(&mut self) -> Option<InternalEventMessageClient> {
         self.receiver.recv().await
     }
 
@@ -56,13 +56,13 @@ impl PlaybackService {
         loop {
             while let Some(message) = self.receive_message().await {
                 match message {
-                    InternalActionMessageClient::ConnectedToServer(sender) => {
+                    InternalEventMessageClient::ConnectedToServer(sender) => {
                         self.subscribe_to_remote_service(sender).await?
                     }
-                    InternalActionMessageClient::PlayAudio(audio_file_path, sender) => {
+                    InternalEventMessageClient::PlayAudio(audio_file_path, sender) => {
                         self.play_audio(audio_file_path, sender).await?
                     }
-                    InternalActionMessageClient::Config(_) => {
+                    InternalEventMessageClient::Config(_) => {
                         unimplemented!("This message is not yet functional.")
                     }
                     _ => {
@@ -79,11 +79,11 @@ impl PlaybackService {
     /// several different messages if required.
     async fn subscribe_to_remote_service(
         &mut self,
-        server_sender: Sender<InternalActionMessageClient>,
+        server_sender: Sender<InternalEventMessageClient>,
     ) -> Result<(), PlaybackServiceError> {
         info!("{} subscribing to Server AudioPlayer", self.to_string());
         Ok(server_sender
-            .send(InternalActionMessageClient::SubscribeToService(
+            .send(InternalEventMessageClient::SubscribeToService(
                 Service::AudioPlayer,
             ))
             .await?)
@@ -92,7 +92,7 @@ impl PlaybackService {
     async fn play_audio(
         &mut self,
         audio_file_data: AudioFile,
-        sender: Sender<InternalActionMessageClient>,
+        sender: Sender<InternalEventMessageClient>,
     ) -> Result<(), PlaybackServiceError> {
         info!("Playing audio file {:?}.", audio_file_data);
         let audio_file_path = Path::join(&self.media_path, audio_file_data.file_name_with_extension().to_string());

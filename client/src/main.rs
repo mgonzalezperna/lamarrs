@@ -26,13 +26,13 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Internal message types to be transmited between actors inside Lamarrs client.
 /// These are also the payloads the clients will be sending inside the Exchange Messages.
 #[derive(Debug)]
-pub enum InternalActionMessageClient {
-    ConnectedToServer(Sender<InternalActionMessageClient>),
+pub enum InternalEventMessageClient {
+    ConnectedToServer(Sender<InternalEventMessageClient>),
     SubscribeToService(ServerService),
-    PlayAudio(AudioFile, Sender<InternalActionMessageClient>),
-    ShowSubtitles(String, Sender<InternalActionMessageClient>),
-    NewDmxColour(ColourRgb, Sender<InternalActionMessageClient>),
-    NewLedColour(ColourRgb, Sender<InternalActionMessageClient>),
+    PlayAudio(AudioFile, Sender<InternalEventMessageClient>),
+    ShowSubtitles(String, Sender<InternalEventMessageClient>),
+    NewDmxColour(ColourRgb, Sender<InternalEventMessageClient>),
+    NewLedColour(ColourRgb, Sender<InternalEventMessageClient>),
     Config(serde_json::Value), // Joker kind, must dissapear in the future.
 }
 
