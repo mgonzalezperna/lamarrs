@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{action_messages::Action, ErrorDescription};
+use crate::{action_messages::Event, ErrorDescription};
 
 /// Wrapper for the messages traveling between the Clients and the Server
 ///
@@ -14,8 +14,8 @@ use crate::{action_messages::Action, ErrorDescription};
 pub enum ExchangeMessage {
     Ack(AckResult),
     Nack(NackResult),
-    Request(Action),
-    Update(Action),
+    Request(Event),
+    Update(Event),
     Error(ErrorDescription),
 }
 
