@@ -1,34 +1,34 @@
 use std::env;
 use std::io;
+mod client_factory;
+mod client_handler;
 mod mqtt;
 mod services;
-mod subscriber;
-mod test;
-mod ws_factory;
+//mod test; Tests are all broken, will fix them as soon as possible.
 
-use crate::services::text_streamers::SubtitlesStreamer;
-use crate::ws_factory::SubscriberBuilder;
+use crate::client_factory::ClientBuilder;
+use crate::services::service::ColourService;
+use crate::services::service::PlaybackService;
+use crate::services::service::SubtitleService;
+use crate::services::LamarrsService;
+use color_eyre::Result;
+use color_eyre::eyre::eyre;
 use mqtt::MqttInterface;
-use services::sound_streamers::MidiStreamer;
-use services::text_streamers::ColorStreamer;
 use tokio::net::TcpListener;
+use tracing::instrument;
 use tracing::{debug, error, info};
 use tracing_subscriber::filter::{EnvFilter, ParseError};
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[derive(Debug, thiserror::Error)]
-pub enum ServerError {
+pub enum LamarrsServerError {
+    #[error("There was an error configuring the Lamarrs server: {}", err_desc)]
+    ServerConfig { err_desc: String },
     #[error("An error ocurred while trying to bind the TCP Listener")]
-    Error(#[from] io::Error),
+    TcpListener(#[from] io::Error),
     #[error("The message has to be a valid UTF8 string.")]
-    FromUtf8Error(#[from] std::string::FromUtf8Error),
-    #[error("There was a irrecoverable error initialising the SubtitlesService.")]
-    SubtitleServiceError,
-    #[error("There was a irrecoverable error initialising the ColorService.")]
-    ColorServiceError,
-    #[error("There was a irrecoverable error initialising the MidiService.")]
-    MidiServiceError,
-    #[error("There was a irrecoverable error initialising the WebSocketService.")]
-    WebSocketFactoryError,
+    FromUtf8(#[from] std::string::FromUtf8Error),
 }
 
 fn configure_logging(level: &str) -> Result<(), ParseError> {
@@ -50,44 +50,63 @@ fn configure_logging(level: &str) -> Result<(), ParseError> {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), ServerError> {
-    let addr = env::args()
-        .nth(1)
-        .unwrap_or_else(|| "127.0.0.1:8080".to_string());
-    configure_logging("debug");
-    // Create the event loop and TCP listener we'll accept connections on.
-    let try_socket = TcpListener::bind(&addr).await;
+#[instrument(err)]
+async fn main() -> Result<()> {
+    // `main` uses color eyre to show the custom errors in a human readable way if anything
+    // crashes the program.
+    color_eyre::install()?;
+    info! {VERSION};
+
+    let server_ip_addr = env::args().nth(1).ok_or(LamarrsServerError::ServerConfig {
+        err_desc: "The address:port to serve Lamarrs was not provided".into(),
+    })?;
+    configure_logging("debug").map_err(|e| LamarrsServerError::ServerConfig {
+        err_desc: e.to_string(),
+    })?;
+
+    // Creates the event loop and TCP listener we'll accept connections on.
+    let try_socket = TcpListener::bind(&server_ip_addr).await;
     let listener = try_socket?;
-    println!("Listening on: {}", addr);
-    let mut subtitle_service = SubtitlesStreamer::new();
-    let mut color_service = ColorStreamer::new();
-    let mut midi_service = MidiStreamer::new();
+    info!("Listening on: {}", server_ip_addr);
+
+    // Service creation.
+    // Order of creation is important, since the channels
+    // pipelines to send and receive messages to each Actor.
+    debug!("Creating SubtitleService");
+    let mut subtitle_service = SubtitleService::new();
+    debug!("Creating ColourService");
+    let mut colour_service = ColourService::new();
+    debug!("Creating PlaybackService");
+    let mut playback_service = PlaybackService::new();
+    debug!("Creating MQTT Interface");
     let mut mqtt_interface = MqttInterface::new(
         subtitle_service.sender.clone(),
-        color_service.sender.clone(),
-        midi_service.sender.clone(),
+        colour_service.sender.clone(),
+        playback_service.sender.clone(),
     );
-    let ws_factory = SubscriberBuilder::new(
+    debug!("Creating Client builder");
+    let client_builder = ClientBuilder::new(
         subtitle_service.sender.clone(),
-        color_service.sender.clone(),
-        midi_service.sender.clone(),
+        colour_service.sender.clone(),
+        playback_service.sender.clone(),
     );
 
     tokio::select! {
-        _ = subtitle_service.run() => {
-            Err(ServerError::SubtitleServiceError)
+        result = subtitle_service.run() => {
+            Err(eyre!("Subtitles service crashed: {:?}", result))?
         }
-        _ = color_service.run() => {
-            Err(ServerError::ColorServiceError)
+        result = colour_service.run() => {
+            Err(eyre!("Colour service crashed: {:?}", result))?
         }
-        _ = midi_service.run() => {
-            Err(ServerError::MidiServiceError)
+        result = playback_service.run() => {
+            Err(eyre!("Playback service crashed: {:?}", result))?
         }
-        _ = mqtt_interface.run() => {
-            Err(ServerError::WebSocketFactoryError)
+        result = mqtt_interface.run() => {
+            Err(eyre!("MQTT service crashed: {:?}", result))?
         }
-        _ = ws_factory.run(listener) => {
-            Err(ServerError::WebSocketFactoryError)
+        result = client_builder.run(listener) => {
+            Err(eyre!("Client builder service crashed: {:?}", result))?
         }
     }
+    Ok(())
 }
