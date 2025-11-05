@@ -1,5 +1,5 @@
 use futures_util::{SinkExt, StreamExt};
-use lamarrs_utils::enums::{self, GatewayMessage, RelativeLocation, SubscriberMessage};
+use lamarrs_utils::enums::{self, ClientMessage, ClientMessage, RelativeLocation};
 use tokio::{
     io,
     sync::mpsc::{
@@ -27,9 +27,9 @@ pub struct FakeSubscriber {
     id: Uuid,
     url: Url,
     // Receiver from websocket connection
-    read: mpsc::Receiver<GatewayMessage>,
+    read: mpsc::Receiver<ClientMessage>,
     // Sender to websocket connection
-    write: mpsc::Sender<SubscriberMessage>,
+    write: mpsc::Sender<ClientMessage>,
 }
 
 impl FakeSubscriber {
@@ -47,19 +47,16 @@ impl FakeSubscriber {
         }
     }
 
-    pub async fn recv(&mut self) -> Option<GatewayMessage> {
+    pub async fn recv(&mut self) -> Option<ClientMessage> {
         self.read.recv().await
     }
 
-    pub async fn try_recv(&mut self) -> Result<GatewayMessage, TryRecvError> {
+    pub async fn try_recv(&mut self) -> Result<ClientMessage, TryRecvError> {
         self.read.try_recv()
     }
 
     /// Send an message to the server
-    pub async fn send(
-        &mut self,
-        message: SubscriberMessage,
-    ) -> Result<(), SendError<SubscriberMessage>> {
+    pub async fn send(&mut self, message: ClientMessage) -> Result<(), SendError<ClientMessage>> {
         self.write.send(message).await
     }
 
@@ -67,7 +64,7 @@ impl FakeSubscriber {
     pub async fn stop(&mut self) {
         self.read.close();
         self.write
-            .send(SubscriberMessage::CloseConnection(
+            .send(ClientMessage::CloseConnection(
                 enums::CloseConnectionReason::SubscriberRequest,
             ))
             .await
@@ -86,11 +83,8 @@ impl FakeSubscriber {
     }
 
     pub async fn register(&mut self) {
-        self.send(SubscriberMessage::Register((
-            self.id,
-            self.location.clone(),
-        )))
-        .await;
+        self.send(ClientMessage::Register((self.id, self.location.clone())))
+            .await;
     }
 
     pub async fn restart(&mut self) {
@@ -101,8 +95,8 @@ impl FakeSubscriber {
 
 async fn listen(
     url: Url,
-    mut read: mpsc::Receiver<SubscriberMessage>,
-    write: mpsc::Sender<GatewayMessage>,
+    mut read: mpsc::Receiver<ClientMessage>,
+    write: mpsc::Sender<ClientMessage>,
 ) -> Result<(), FakeSubscriberError> {
     let (ws_stream, _) = tokio_tungstenite::connect_async(url).await?;
 
@@ -125,7 +119,7 @@ async fn listen(
     tokio::spawn(async move {
         while let Some(msg) = read.recv().await {
             debug!(?msg, "Message to be send to server");
-            if let SubscriberMessage::CloseConnection(_) = msg {
+            if let ClientMessage::CloseConnection(_) = msg {
                 sink.send(tungstenite::Message::Close(None)).await;
                 sink.close().await.unwrap();
                 break;
