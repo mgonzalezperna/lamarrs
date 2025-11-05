@@ -1,9 +1,9 @@
 use tracing::error;
 use wasm_bindgen::prelude::*;
 
-use lamarrs_utils::midi_event::MidiEvent;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SizedSample, Stream};
+use lamarrs_utils::midi_event::MidiEvent;
 use std::sync::mpsc::{Receiver, Sender};
 
 #[wasm_bindgen]
@@ -56,7 +56,7 @@ where
 
         // Load from memory
         use std::io::Cursor;
-        let mut file = Cursor::new(include_bytes!("../assets/sounds/soundfonts.sf2"));
+        let mut file = Cursor::new(include_bytes!("../assets/soundfonts.sf2"));
         let font = oxisynth::SoundFont::load(&mut file).unwrap();
 
         synth.add_font(font, true);

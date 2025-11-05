@@ -6,7 +6,10 @@ use futures::{
     channel::mpsc::{Receiver, Sender},
     SinkExt, StreamExt,
 };
-use lamarrs_utils::{enums::{GatewayError, GatewayMessage, SubscriberMessage}, midi_event::MidiEvent};
+use lamarrs_utils::{
+    enums::{ClientMessage, ClientMessage, GatewayError},
+    midi_event::MidiEvent,
+};
 use reqwasm::websocket::{futures::WebSocket, Message};
 
 use wasm_bindgen_futures::spawn_local;
@@ -14,7 +17,7 @@ use wasm_bindgen_futures::spawn_local;
 use crate::midi_processor;
 
 pub struct WebsocketService {
-    pub sender: Sender<SubscriberMessage>,
+    pub sender: Sender<ClientMessage>,
 }
 
 impl WebsocketService {
@@ -23,11 +26,11 @@ impl WebsocketService {
         mut subs: Signal<String>,
         mut sound_engine: Coroutine<MidiEvent>,
     ) -> Self {
-        let ws = WebSocket::open("ws://127.0.0.1:8080").unwrap();
+        let ws = WebSocket::open("ws://192.168.178.70:8080").unwrap();
 
         let (mut outgoing, mut incoming) = ws.split();
 
-        let (sender, mut receiver) = futures::channel::mpsc::channel::<SubscriberMessage>(32);
+        let (sender, mut receiver) = futures::channel::mpsc::channel::<ClientMessage>(32);
 
         spawn_local(async move {
             while let Some(subscriber_message) = receiver.next().await {
@@ -50,15 +53,15 @@ impl WebsocketService {
                         Ok(Message::Text(payload)) => {
                             log::debug!("From Gateway: {}", payload);
                             match serde_json::from_str(&payload) {
-                                Ok(GatewayMessage::Subtitle(subtitle)) => {
+                                Ok(ClientMessage::Subtitle(subtitle)) => {
                                     log::info!("New subtitles sent by Gateway: {}", subtitle);
                                     subs.set(subtitle.to_string());
                                 }
-                                Ok(GatewayMessage::Color(color)) => {
+                                Ok(ClientMessage::Color(color)) => {
                                     log::info!("Request change of Color by Gateway: {}", color);
                                     bg.set(color.to_string());
                                 }
-                                Ok(GatewayMessage::Midi(midi_event)) => {
+                                Ok(ClientMessage::Midi(midi_event)) => {
                                     log::info!("Midi Event received: {}", midi_event);
                                     sound_engine.send(midi_event)
                                 }

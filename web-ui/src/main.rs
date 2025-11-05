@@ -5,11 +5,14 @@ pub mod websocket;
 
 use dioxus::prelude::*;
 use futures_util::StreamExt;
-use lamarrs_utils::{enums::{RelativeLocation, Service, SubscriberMessage}, midi_event::{self, MidiEvent}};
+use lamarrs_utils::{
+    enums::{ClientMessage, RelativeLocation, Service},
+    midi_event::{self, MidiEvent},
+};
 use log::{debug, error, info};
 use tracing::field::debug;
 use uuid::Uuid;
-const _TAILWIND_URL: &str = manganis::mg!(file("dist/tailwind.css"));
+const _TAILWIND_URL: &str = manganis::mg!(file("assets/tailwind.css"));
 
 fn main() {
     // Init logger
@@ -23,33 +26,34 @@ fn App() -> Element {
     let mut location = use_signal(|| RelativeLocation::Center);
     let background_color = use_signal(|| String::from("red"));
     let subtitle = use_signal(|| String::from(""));
-    let sound_engine: Coroutine<MidiEvent> = use_coroutine(|mut rx: UnboundedReceiver<MidiEvent>| async move {
-        let mut sound_handler: Option<midi_processor::Handle> = None;
-        loop {
-            while let Some(midi_event) = rx.next().await {
-                if let MidiEvent::SystemReset = midi_event {
-                   sound_handler = Some(midi_processor::create_handler());
-                }
-                match &sound_handler {
-                    Some(handler) =>{
-                        debug!("Playing note");
-                        handler.send(midi_event);
-                    },
-                    None => {
-                        error!("No sound context! MidiEvent can't be processed");
-                        break;
+    let sound_engine: Coroutine<MidiEvent> =
+        use_coroutine(|mut rx: UnboundedReceiver<MidiEvent>| async move {
+            let mut sound_handler: Option<midi_processor::Handle> = None;
+            loop {
+                while let Some(midi_event) = rx.next().await {
+                    if let MidiEvent::SystemReset = midi_event {
+                        sound_handler = Some(midi_processor::create_handler());
+                    }
+                    match &sound_handler {
+                        Some(handler) => {
+                            debug!("Playing note");
+                            handler.send(midi_event);
+                        }
+                        None => {
+                            error!("No sound context! MidiEvent can't be processed");
+                            break;
+                        }
                     }
                 }
             }
-        }
-    });
-    let ws: Coroutine<SubscriberMessage> =
-        use_coroutine(|mut rx: UnboundedReceiver<SubscriberMessage>| async move {
+        });
+    let ws: Coroutine<ClientMessage> =
+        use_coroutine(|mut rx: UnboundedReceiver<ClientMessage>| async move {
             let mut conn =
                 websocket::WebsocketService::new(background_color, subtitle, sound_engine);
             let register = conn
                 .sender
-                .try_send(SubscriberMessage::Register((uuid, location.read().clone())));
+                .try_send(ClientMessage::Register((uuid, location.read().clone())));
             debug!("Register results {:?}", register);
             loop {
                 while let Some(message) = rx.next().await {
@@ -84,7 +88,7 @@ fn App() -> Element {
                     input {
                         class: "appearance-none transition-colors cursor-pointer w-14 h-7 rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-black focus:ring-blue-500 bg-red-500 checked:bg-green-500 peer",
                         r#type: "checkbox",
-                        onchange: move |_| ws.send(SubscriberMessage::Subscribe(Service::Subtitle)),
+                        onchange: move |_| ws.send(ClientMessage::Subscribe(Service::Subtitle)),
                     }
                     span {
                         class: "absolute font-medium text-xs uppercase right-1 text-white",
@@ -123,7 +127,7 @@ fn App() -> Element {
                         class: "appearance-none transition-colors cursor-pointer w-14 h-7 rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-black focus:ring-blue-500 bg-red-500 checked:bg-green-500 peer",
                         r#type: "checkbox",
                         onchange: move |_| {
-                            ws.send(SubscriberMessage::Subscribe(Service::Color));
+                            ws.send(ClientMessage::Subscribe(Service::Color));
                         }
                     }
                     span {
@@ -163,7 +167,7 @@ fn App() -> Element {
                         class: "appearance-none transition-colors cursor-pointer w-14 h-7 rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-black focus:ring-blue-500 bg-red-500 checked:bg-green-500 peer",
                         r#type: "checkbox",
                         onchange: move |_| {
-                            ws.send(SubscriberMessage::Subscribe(Service::Midi));
+                            ws.send(ClientMessage::Subscribe(Service::Midi));
                             sound_engine.send(MidiEvent::SystemReset)
                         }
                     }
@@ -194,7 +198,7 @@ fn App() -> Element {
                         name:"status",
                         onclick: move |_| {
                             location.set(RelativeLocation::Left);
-                            ws.send(SubscriberMessage::UpdateLocation(RelativeLocation::Left))
+                            ws.send(ClientMessage::UpdateLocation(RelativeLocation::Left))
                         },
                     }
                     label {
@@ -210,7 +214,7 @@ fn App() -> Element {
                         checked: true,
                         onclick: move |_| {
                             location.set(RelativeLocation::Center);
-                            ws.send(SubscriberMessage::UpdateLocation(RelativeLocation::Center))
+                            ws.send(ClientMessage::UpdateLocation(RelativeLocation::Center))
                         },
                     }
                     label {
@@ -225,7 +229,7 @@ fn App() -> Element {
                         name:"status",
                         onclick: move |_| {
                             location.set(RelativeLocation::Right);
-                            ws.send(SubscriberMessage::UpdateLocation(RelativeLocation::Right))
+                            ws.send(ClientMessage::UpdateLocation(RelativeLocation::Right))
                         },
                     }
                     label {
