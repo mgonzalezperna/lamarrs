@@ -1,0 +1,17 @@
+# Rpi3bDockerfile
+FROM ghcr.io/cross-rs/aarch64-unknown-linux-gnu:main
+
+# Install cross-architecture OpenSSL + ALSA + pkg-config
+RUN dpkg --add-architecture arm64 && \
+    apt-get update && \
+    apt-get install -y \
+        libssl-dev:arm64 \
+        libasound2:arm64 \
+        libasound2-dev:arm64 \
+        pkg-config \
+        && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Point pkg-config to the ARM64 library metadata
+ENV PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig
+ENV PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig
+ENV PKG_CONFIG_ALLOW_CROSS=1

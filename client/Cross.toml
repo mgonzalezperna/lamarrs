@@ -1,0 +1,9 @@
+[target.aarch64-unknown-linux-gnu]
+dockerfile = "./Rpi3bDockerfile"
+
+[build.env]
+passthrough = [
+    "PKG_CONFIG_LIBDIR",
+    "PKG_CONFIG_PATH",
+    "PKG_CONFIG_ALLOW_CROSS",
+]
