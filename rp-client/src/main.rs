@@ -27,6 +27,10 @@ use embedded_graphics::{
     text::{Baseline, Text},
 };
 use heapless::String;
+use lamarrs_utils::action_messages::Action;
+use lamarrs_utils::exchange_messages::ExchangeMessage;
+use lamarrs_utils::ClientIdAndLocation;
+use serde::Serialize;
 use ssd1306::mode::{BufferedGraphicsMode, DisplayConfig};
 use ssd1306::prelude::{DisplayRotation, I2CInterface};
 use ssd1306::size::DisplaySize128x64;
@@ -34,10 +38,9 @@ use ssd1306::{I2CDisplayInterface, Ssd1306};
 use static_cell::StaticCell;
 use uuid::Builder;
 
-mod websocket_client;
-use websocket_client::WebSocket;
-
-use {defmt_rtt as _, panic_probe as _, serde_json_core};
+mod server_handler;
+mod websocket_handler;
+use {defmt_rtt as _, panic_probe as _};
 
 bind_interrupts!(struct Irqs {
     I2C1_IRQ => InterruptHandler_i2c<I2C1>;
