@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use strum::Display;
 
 use crate::{action_messages::Event, ErrorDescription};
 
@@ -10,7 +11,7 @@ use crate::{action_messages::Event, ErrorDescription};
 ///  * Request: Client > Server. Request sent by the client to the server to perform an action.
 ///  * Update: Server > Client. Update sent one of the service the client is subscribed to.
 ///  * Error: Server > Client. Jocker type message for yet-unmapped error cases.
-#[derive(Deserialize, Serialize, PartialEq, Debug)]
+#[derive(Deserialize, Display, Serialize, PartialEq, Debug)]
 pub enum ExchangeMessage {
     Ack(AckResult),
     Nack(NackResult),
