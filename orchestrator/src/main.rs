@@ -6,12 +6,10 @@ use std::{
 
 use inquire::{CustomType, InquireError, Select};
 use lamarrs_utils::{
-    enums::{Color, OrchestratorMessage, RelativeLocation, Service},
-    error,
-    messages::{SendColor, SendMidiEvent, SendSubtitle, Subtitle}, midi_event::MidiEvent,
+    AudioFile, ColourRgb, RelativeLocation, Service, Subtitles, action_messages::{Event, Action}, orchestration_messages::OrchestrationMessage
 };
 use lipsum::lipsum_words_with_rng;
-use rand::seq::SliceRandom;
+use rand::seq::{IndexedRandom, SliceRandom};
 use rumqttc::{mqttbytes::QoS, Client, Connection, EventLoop, MqttOptions};
 use strum::{EnumIter, IntoEnumIterator};
 use tracing::{info, instrument};
@@ -37,7 +35,7 @@ fn configure_logging(level: &str) -> Result<(), ParseError> {
 #[instrument(name = "Orchestrator::main", level = "INFO")]
 fn main() {
     configure_logging("debug");
-    let host = "localhost";
+    let host = "192.168.178.70";
     let port: u16 = 1883;
     let mut mqttoptions = MqttOptions::new("lamarrs-orchestrator", host, port);
     mqttoptions.set_keep_alive(Duration::from_secs(5));
@@ -60,32 +58,27 @@ fn main() {
     {
         info!("Entering Loop mode, to exit please press Ctrl+C");
         loop {
-            let rnd_service = services.choose(&mut rand::thread_rng()).unwrap();
-            let rnd_location = locations.choose(&mut rand::thread_rng()).unwrap();
-            let orchestrator_message: OrchestratorMessage = match rnd_service {
-                Service::Subtitle => OrchestratorMessage::SendSubtitle(SendSubtitle {
-                    subtitle: Subtitle::from_str(
-                        lipsum_words_with_rng(&mut rand::thread_rng(), 3).as_str(),
-                    )
-                    .unwrap(),
-                    target_location: rnd_location.to_owned(),
-                }),
-                Service::Color => OrchestratorMessage::SendColor(SendColor {
-                    color: Color::iter()
-                        .collect::<Vec<_>>()
-                        .choose(&mut rand::thread_rng())
-                        .unwrap()
-                        .to_owned(),
-                    target_location: rnd_location.to_owned(),
-                }),
-                Service::Midi => OrchestratorMessage::SendMidi(SendMidiEvent{
-                    event: MidiEvent::NoteOn {
-                        channel: 0, //*midi_channel.choose(&mut rand::thread_rng()).unwrap(), 
-                        key: *midi_key.choose(&mut rand::thread_rng()).unwrap(),
-                        vel: *midi_vel.choose(&mut rand::thread_rng()).unwrap(),
-                    },
-                    target_location: rnd_location.to_owned(),
-                })
+            let rnd_service = services.choose(&mut rand::rng()).unwrap();
+            //let rnd_location = locations.choose(&mut rand::rng()).unwrap();
+            let rnd_location = None;
+            // I don't care if the subs are not random anymore. May fix it later, perhaps.
+            let subtitles = heapless::String::try_from(lipsum::lipsum(5).as_str()).unwrap();
+            let orchestrator_message: OrchestrationMessage = match rnd_service {
+                Service::Subtitle => OrchestrationMessage::Request(
+                    Event::UpdateClient(Action::ShowNewSubtitles(Subtitles {
+                        subtitles,
+                    })),
+                    rnd_location.to_owned(),
+                ),
+                Service::Colour => OrchestrationMessage::Request(
+                    Event::UpdateClient(Action::ChangeColour(ColourRgb {
+                        r: rand::random_range(0..=255),
+                        g: rand::random_range(0..=255),
+                        b: rand::random_range(0..=255),
+                    })),
+                    rnd_location.to_owned(),
+                ),
+                _ => break,
             };
             send_to_mqtt(mqtt_sender.clone(), orchestrator_message);
             while let Some(Ok(notification)) = mqtt_receiver.iter().next() {
@@ -98,17 +91,18 @@ fn main() {
 
     let selected_service: Result<Service, InquireError> =
         Select::new("Select service to orchestrate", services).prompt();
-    let target_location: Result<RelativeLocation, InquireError> =
-        Select::new("What's the target location", locations).prompt();
+    // let target_location: Result<RelativeLocation, InquireError> =
+    //     Select::new("What's the target location", locations).prompt();
+    // if let Err(_) = target_location {
+    //     panic!("There was an error processing the target location!");
+    // }
+    let target_location = None;
 
-    if let Err(_) = target_location {
-        panic!("There was an error processing the target location!");
-    }
 
-    let orchestrator_message: OrchestratorMessage = match selected_service {
-        Ok(Service::Subtitle) => on_subtitle(target_location.unwrap()),
-        Ok(Service::Color) => on_color(target_location.unwrap()),
-        Ok(Service::Midi) => on_midi(target_location.unwrap()),
+    let orchestrator_message: OrchestrationMessage = match selected_service {
+        Ok(Service::Subtitle) => on_subtitle(target_location),
+        Ok(Service::Colour) => on_color(target_location),
+        Ok(Service::AudioPlayer) => on_play_audio(target_location),
         Err(_) => panic!("There was an error, please try again"),
     };
     send_to_mqtt(mqtt_sender, orchestrator_message);
@@ -118,57 +112,78 @@ fn main() {
 }
 
 #[instrument(name = "Orchestrator::on_subtitle", level = "INFO", ret)]
-fn on_subtitle(target_location: RelativeLocation) -> OrchestratorMessage {
-    let subtitles= CustomType::<Subtitle>::new("Subtitles to be sent:")
-    .with_error_message("Subtitles with more than 35 chars can't be sent.")
-    .with_help_message("A String of characters to be sent to the targetted devices. Must be shorter than 35 characters.")
+fn on_subtitle(target_location: Option<RelativeLocation>) -> OrchestrationMessage {
+    let requested_subtitles= CustomType::<String>::new("Subtitles to be sent:")
+    .with_error_message("Subtitles with more than 50 chars can't be sent.")
+    .with_help_message("A String of characters to be sent to the targetted devices. Must be shorter than 50 characters.")
     .prompt();
-
-    match subtitles {
-        Ok(subtitle) => OrchestratorMessage::SendSubtitle(SendSubtitle {
-            subtitle,
-            target_location,
-        }),
-        Err(_) => panic! {"There was an error building the subtitles message to be sent"},
-    }
+    let subtitles = heapless::String::try_from(requested_subtitles.unwrap().as_str()).unwrap();
+    OrchestrationMessage::Request(
+        Event::UpdateClient(Action::ShowNewSubtitles(Subtitles { subtitles })),
+        target_location,
+    )
 }
 
 #[instrument(name = "Orchestrator::on_color", level = "INFO", ret)]
-fn on_color(target_location: RelativeLocation) -> OrchestratorMessage {
-    let colors: Vec<Color> = Color::iter().collect::<Vec<_>>();
-    let selected_color: Result<Color, InquireError> =
-        Select::new("Color to be sent:", colors).prompt();
+fn on_color(target_location: Option<RelativeLocation>) -> OrchestrationMessage {
+    let red = CustomType::<u8>::new("Red:")
+        .with_error_message("Red must have a value between 0 and 255.")
+        .with_help_message("The value for Red in the RGB message to be sent.")
+        .prompt();
+    let green = CustomType::<u8>::new("Green:")
+        .with_error_message("Green must have a value between 0 and 255.")
+        .with_help_message("The value for Green in the RGB message to be sent.")
+        .prompt();
+    let blue = CustomType::<u8>::new("Blue:")
+        .with_error_message("Blue must have a value between 0 and 255.")
+        .with_help_message("The value for Blue in the RGB message to be sent.")
+        .prompt();
 
-    match selected_color {
-        Ok(color) => OrchestratorMessage::SendColor(SendColor {
-            color,
-            target_location,
-        }),
-        Err(_) => panic! {"There was an error building the color message to be sent"},
-    }
+    OrchestrationMessage::Request(
+        Event::UpdateClient(Action::ChangeColour(ColourRgb {
+            r: red.unwrap(),
+            g: green.unwrap(),
+            b: blue.unwrap(),
+        })),
+        target_location.to_owned(),
+    )
 }
 
-#[instrument(name = "Orchestrator::on_color", level = "INFO", ret)]
-fn on_midi(target_location: RelativeLocation) -> OrchestratorMessage {
-    let midi_channel: Vec<u8> = (0..15).collect();
-    let midi_key: Vec<u8> = (0..127).collect();
-    let midi_vel: Vec<u8> = (0..100).collect();
-    let selected_channel: Result<u8, InquireError> =
-        Select::new("MIDI Channel targetted:", midi_channel).prompt();
-    let selected_key: Result<u8, InquireError> =
-        Select::new("MIDI note:", midi_key).prompt();
-    let selected_vel: Result<u8, InquireError> =
-        Select::new("MIDI velocity:", midi_vel).prompt();
+#[instrument(name = "Orchestrator::on_subtitle", level = "INFO", ret)]
+fn on_play_audio(target_location: Option<RelativeLocation>) -> OrchestrationMessage {
+    let requested_audio_file_with_extension= CustomType::<String>::new("Audio file to be played. INCLUDE EXTENSION:")
+    .with_error_message("Audio file name with more than 55 chars can't be sent.")
+    .with_help_message("A String of characters to be sent to the targetted devices. Must be shorter than 55 characters.")
+    .prompt()
+    .unwrap();
+    let parsed_request: Vec<&str> = requested_audio_file_with_extension.split(".").collect();
+    let file_name = heapless::String::try_from(parsed_request[0]).unwrap();
+    let file_extension = heapless::String::try_from(parsed_request[1]).unwrap();
 
-
-    match (selected_channel, selected_key, selected_vel) {
-        (Ok(channel), Ok(key), Ok(vel)) => OrchestratorMessage::SendMidi(SendMidiEvent {
-            event: MidiEvent::NoteOn { channel, key, vel },
-            target_location,
-        }),
-        _ => panic! {"There was an error building the MIDI message to be sent"},
-    }
+    OrchestrationMessage::Request(
+        Event::UpdateClient(Action::PlayAudio(AudioFile{ file_name, file_extension })),
+        target_location,
+    )
 }
+
+// #[instrument(name = "Orchestrator::on_color", level = "INFO", ret)]
+// fn on_midi(target_location: RelativeLocation) -> OrchestratorMessage {
+//     let midi_channel: Vec<u8> = (0..15).collect();
+//     let midi_key: Vec<u8> = (0..127).collect();
+//     let midi_vel: Vec<u8> = (0..100).collect();
+//     let selected_channel: Result<u8, InquireError> =
+//         Select::new("MIDI Channel targetted:", midi_channel).prompt();
+//     let selected_key: Result<u8, InquireError> = Select::new("MIDI note:", midi_key).prompt();
+//     let selected_vel: Result<u8, InquireError> = Select::new("MIDI velocity:", midi_vel).prompt();
+
+//     match (selected_channel, selected_key, selected_vel) {
+//         (Ok(channel), Ok(key), Ok(vel)) => OrchestratorMessage::SendMidi(SendMidiEvent {
+//             event: MidiEvent::NoteOn { channel, key, vel },
+//             target_location,
+//         }),
+//         _ => panic! {"There was an error building the MIDI message to be sent"},
+//     }
+// }
 
 #[instrument(
     name = "Orchestrator::send_to_mqtt",
@@ -176,7 +191,7 @@ fn on_midi(target_location: RelativeLocation) -> OrchestratorMessage {
     level = "INFO",
     ret
 )]
-fn send_to_mqtt(mqtt_sender: Client, orchestrator_message: OrchestratorMessage) {
+fn send_to_mqtt(mqtt_sender: Client, orchestrator_message: OrchestrationMessage) {
     info!(
         "Message to be sent via MQTT {}",
         serde_json::to_string(&orchestrator_message)
