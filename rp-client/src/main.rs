@@ -154,97 +154,6 @@ async fn net_task(mut runner: embassy_net::Runner<'static, cyw43::NetDriver<'sta
     runner.run().await
 }
 
-/// Lamarrs websocket handler.
-/// It connects to the target server, upgrades the connection to a Websocket,
-/// does the initial client base registration and subscribes to Color service.
-/// WIP.
-#[embassy_executor::task]
-async fn ws_task(stack: embassy_net::Stack<'static>, target: IpEndpoint) {
-    let mut rx_buffer: [u8; 4096] = [0u8; 4096];
-    let mut tx_buffer: [u8; 4096] = [0u8; 4096];
-    let mut uuid_buffer = [0u8; 64];
-    let mut ws_reading_buffer = [0u8; 256];
-    let oled_sender = OLED_CHANNEL.sender();
-
-    // Connects and upgrades to websocket.
-    let try_connect_websocket =
-        WebSocket::connect(stack, &mut rx_buffer, &mut tx_buffer, target).await;
-    let mut websocket =
-        try_connect_websocket.expect("This should not fail, something went terribly wrong."); // Error handling is awful.
-    oled_sender
-        .send(OledEvents::ConnectedToOrchestrator(true))
-        .await;
-
-    // Sends initial basic registration message to lamarrs server.
-    let mut message_to_orchestrator: String<512> = String::new();
-
-    let mut rng = RoscRng;
-    let mut random_bytes = [0u8; 16];
-    rng.fill_bytes(&mut random_bytes);
-    let client_id = Builder::from_random_bytes(random_bytes).into_uuid();
-
-    write!(
-        &mut message_to_orchestrator,
-        "{{\"Register\":[\"{}\",\"Center\"]}}",
-        client_id.as_hyphenated().encode_lower(&mut uuid_buffer)
-    )
-    .unwrap();
-
-    match websocket.send_text(&message_to_orchestrator).await {
-        Ok(_) => {
-            defmt::info!("Successfully registered to lamarrs!");
-            message_to_orchestrator = String::new();
-            if let Ok(payload) = websocket.recv_text(&mut ws_reading_buffer).await {
-                let msg =
-                    core::str::from_utf8(&ws_reading_buffer[..payload]).unwrap_or("<invalid>");
-                defmt::info!("Received: {}", msg);
-            }
-        }
-        Err(e) => {
-            defmt::warn!(
-                "Error while trying to register to lamarrs orchestrator: {:?}",
-                e
-            );
-        }
-    }
-
-    // Send subscription to color service.
-    write!(&mut message_to_orchestrator, "{{\"Subscribe\":\"Color\"}}",).unwrap();
-    match websocket.send_text(&message_to_orchestrator).await {
-        Ok(_) => {
-            defmt::info!("Successfully subscribed to color messages of lamarrs!");
-            if let Ok(payload) = websocket.recv_text(&mut ws_reading_buffer).await {
-                let msg =
-                    core::str::from_utf8(&ws_reading_buffer[..payload]).unwrap_or("<invalid>");
-                defmt::info!("Received: {}", msg);
-            }
-        }
-        Err(e) => {
-            defmt::warn!(
-                "Error while trying to subscribe to color messages of lamarrs orchestrator: {:?}",
-                e
-            );
-        }
-    }
-
-    // Listener loop.
-    loop {
-        match websocket.recv_text(&mut ws_reading_buffer).await {
-            Ok(payload) => {
-                let message =
-                    core::str::from_utf8(&ws_reading_buffer[..payload]).unwrap_or("<invalid>");
-                oled_sender
-                    .send(OledEvents::WsMessage(String::try_from(message).unwrap()))
-                    .await;
-                defmt::info!("Received: {}", message);
-            }
-            Err(e) => {
-                defmt::warn!("Error receiving frame from lamarrs orchestrator: {:?}", e);
-            }
-        }
-    }
-}
-
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     defmt::info!("Booting up!");
@@ -346,5 +255,7 @@ async fn main(spawner: Spawner) {
 
     let lamarrs_ip_address = Ipv4Address::from_str("").unwrap();
     let target = IpEndpoint::new(IpAddress::Ipv4(lamarrs_ip_address), 8080);
-    spawner.spawn(ws_task(stack, target)).unwrap();
+    spawner
+        .spawn(server_handler::server_handler(stack, target))
+        .unwrap();
 }
