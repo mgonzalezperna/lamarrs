@@ -33,8 +33,12 @@ pub enum ClientHandlerError {
     UnrecognizableMessage(String),
     #[error("Invalid ExchangeMessage received from remote Client: {0}")]
     InvalidExchangeMessage(String),
+    #[error("Fatar error deconding a binary ExchangeMessage received from remote Client: {0}")]
+    FailureDecodingBinaryExchangeMessage(String),
     #[error("Error sending an ExchangeMessage")]
-    SendActionMessageWithSender(#[from] mpsc::error::SendError<services::InternalEventMessageServer>),
+    SendActionMessageWithSender(
+        #[from] mpsc::error::SendError<services::InternalEventMessageServer>,
+    ),
 }
 
 pub struct Client {
@@ -109,7 +113,7 @@ impl Client {
     /// This function handles the remote Client requests to upgrade an HTTP connection to a
     /// Websocket one.
     /// If succeeds, returns a Sender and Receiver for the newly created WS connection.
-    // #[instrument(name = "Subscriber::accept_and_connect", skip(self), fields(url=?self.id.uuid.clone()), level = "INFO")]
+    #[instrument(name = "Client::accept_and_connect", skip(self), fields(id=?self.id), level = "INFO", ret, err)]
     async fn accept_and_connect(
         &self,
         stream: TcpStream,
@@ -131,25 +135,62 @@ impl Client {
     }
 
     /// Function that "peels" the outer layer of the webscoket frame.
-    #[instrument(name = "Client::handle_ws_message", skip(self), fields(id=?self.id), level = "INFO")]
+    #[instrument(name = "Client::handle_ws_message", skip(self), fields(id=?self.id), level = "INFO", ret, err)]
     async fn handle_ws_message(
         &mut self,
         msg: Option<Result<tungstenite::Message, tokio_tungstenite::tungstenite::Error>>,
         outgoing: &mut SplitSink<TungsteniteWebSocketStream<TcpStream>, TungsteniteMessage>,
     ) -> Result<(), ClientHandlerError> {
         match msg {
-            // Process inbound messages
+            // Process inbound messages from devices that send json using serde_json.
             Some(Ok(TungsteniteMessage::Text(string_payload))) => {
-                debug!(?string_payload, "Inbound Text Message");
+                debug!(?string_payload, "Inbound Text Payload");
+                let payload_as_str_result= serde_json::from_str(&string_payload.to_string());
+                let payload = match payload_as_str_result {
+                    Ok(payload) => payload,
+                    Err(error) => {
+                        error!(
+                            ?error,
+                            "Malformed message received from unregistered device."
+                        );
+                        let error_descr =
+                            heapless::String::try_from("Unrecognized message: Malformed payload.");
+                        match error_descr {
+                            Ok(error_descr) => {
+                                self.sender.send(ExchangeMessage::Error(ErrorDescription{error_descr})).await;
+                            }
+                            Err(_) => error!("Client can't be notified of the error, there was an issue parsing the error message.")
+                        }
+                        return Err(ClientHandlerError::UnrecognizableMessage(string_payload.to_string()))
+                    }
+                };
                 if let None = self.id {
                     // We must get the client a identifier -and lamarrs version in the future-
                     // to secure the client is sane and "orchesteable".
-                    self.on_unregistered_subscriber_message(string_payload.to_string())
+                    self.on_unregistered_subscriber_message(payload)
                         .await?
                 } else {
                     // If the client has been already identified and is talkable for this server
                     // we can process its messages safely.
-                    self.on_subscriber_message(string_payload.to_string())
+                    self.on_subscriber_message(payload)
+                        .await?
+                }
+            }
+            // From embedded devices is easier to just send the data encoded in Bytes using postcard.
+            Some(Ok(TungsteniteMessage::Binary(bytes_payload))) => {
+                debug!(?bytes_payload, "Inbound Binary Payload");
+                let payload = postcard::from_bytes::<ExchangeMessage>(&bytes_payload).map_err(|e| {
+                    ClientHandlerError::FailureDecodingBinaryExchangeMessage(e.to_string())
+                })?;
+                if let None = self.id {
+                    // We must get the client a identifier -and lamarrs version in the future-
+                    // to secure the client is sane and "orchesteable".
+                    self.on_unregistered_subscriber_message(payload)
+                        .await?
+                } else {
+                    // If the client has been already identified and is talkable for this server
+                    // we can process its messages safely.
+                    self.on_subscriber_message(payload)
                         .await?
                 }
             }
@@ -190,10 +231,10 @@ impl Client {
     #[instrument(name = "Client::on_unregistered_subscriber_message", skip(self), fields(id=?self.id), level = "INFO", ret, err)]
     async fn on_unregistered_subscriber_message(
         &mut self,
-        exchange_message: String,
+        exchange_message: ExchangeMessage,
     ) -> Result<(), ClientHandlerError> {
-        match serde_json::from_str(&exchange_message) {
-            Ok(ExchangeMessage::Request(Event::Register(client_id_and_location))) => {
+        match exchange_message {
+            ExchangeMessage::Request(Event::Register(client_id_and_location)) => {
                 info!("Registring new Client {client_id_and_location:?}");
                 self.id = Some(client_id_and_location);
                 self.sender
@@ -201,7 +242,7 @@ impl Client {
                     .await;
                 Ok(())
             }
-            Ok(_) => {
+            _ => {
                 warn!(
                     ?exchange_message,
                     "Message received from unregistered device."
@@ -209,22 +250,7 @@ impl Client {
                 self.sender
                     .send(ExchangeMessage::Nack(NackResult::NotSubscribed))
                     .await;
-                Err(ClientHandlerError::UnregisteredSubscriber(exchange_message))
-            }
-            Err(_) => {
-                error!(
-                    ?exchange_message,
-                    "Malformed message received from unregistered device."
-                );
-                let error_descr =
-                    heapless::String::try_from("Unrecognized message: Malformed payload.");
-                match error_descr {
-                    Ok(error_descr) => {
-                        self.sender.send(ExchangeMessage::Error(ErrorDescription{error_descr})).await;
-                    }
-                    Err(_) => error!("Client can't be notified of the error, there was an issue parsing the error message.")
-                }
-                Err(ClientHandlerError::UnrecognizableMessage(exchange_message))
+                Err(ClientHandlerError::UnregisteredSubscriber(exchange_message.to_string()))
             }
         }
     }
@@ -234,10 +260,10 @@ impl Client {
     #[instrument(name = "Client::on_subscriber_message", skip(self), fields(id=?self.id), level = "INFO", ret, err)]
     async fn on_subscriber_message(
         &mut self,
-        exchange_message: String,
+        exchange_message: ExchangeMessage,
     ) -> Result<(), ClientHandlerError> {
-        match serde_json::from_str(&exchange_message) {
-            Ok(ExchangeMessage::Request(action)) => match action {
+        match exchange_message {
+            ExchangeMessage::Request(action) => match action {
                 Event::SuscribeToService(service, client_id_and_location) => {
                     self.subscribe_to_service(service, client_id_and_location)
                         .await
@@ -250,14 +276,14 @@ impl Client {
                     self.update_location(client_id_and_location).await
                 }
                 _ => {
-                    warn!(?exchange_message, "Requested Action by Client {:?} is not supported. Client may be sending Server Actions?", self.id);
+                        warn!(?action, "Requested Event by Client {:?} is not supported. Client may be sending Server Event?", self.id);
                     self.sender
                         .send(ExchangeMessage::Nack(NackResult::Failed))
                         .await;
-                    Err(ClientHandlerError::InvalidExchangeMessage(exchange_message))
+                    Err(ClientHandlerError::InvalidExchangeMessage(action.to_string()))
                 }
             },
-            Ok(_) => {
+            _ => {
                 warn!(
                     ?exchange_message,
                     "Invalid message received from device {:?}.", self.id
@@ -265,22 +291,7 @@ impl Client {
                 self.sender
                     .send(ExchangeMessage::Nack(NackResult::Failed))
                     .await;
-                Err(ClientHandlerError::InvalidExchangeMessage(exchange_message))
-            }
-            Err(_) => {
-                error!(
-                    ?exchange_message,
-                    "Malformed message received from device {:?}.", self.id
-                );
-                let error_descr =
-                    heapless::String::try_from("Unrecognized message: Malformed payload.");
-                match error_descr {
-                    Ok(error_descr) => {
-                        self.sender.send(ExchangeMessage::Error(ErrorDescription{error_descr})).await;
-                    }
-                    Err(_) => error!("Client can't be notified of the error, there was an issue parsing the error message."),
-                };
-                Err(ClientHandlerError::UnrecognizableMessage(exchange_message))
+                Err(ClientHandlerError::InvalidExchangeMessage(exchange_message.to_string()))
             }
         }
     }
@@ -291,8 +302,10 @@ impl Client {
         service: Service,
         client_id_and_location: ClientIdAndLocation,
     ) -> Result<(), ClientHandlerError> {
-        let message =
-            InternalEventMessageServer::AddTargetClient(client_id_and_location, self.sender.clone());
+        let message = InternalEventMessageServer::AddTargetClient(
+            client_id_and_location,
+            self.sender.clone(),
+        );
         match service {
             Service::Subtitle => Ok(self.subtitles_service.send(message).await?),
             Service::Colour => Ok(self.colour_service.send(message).await?),
