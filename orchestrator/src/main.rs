@@ -6,7 +6,9 @@ use std::{
 
 use inquire::{CustomType, InquireError, Select};
 use lamarrs_utils::{
-    AudioFile, ColourRgb, RelativeLocation, Service, Subtitles, action_messages::{Event, Action}, orchestration_messages::OrchestrationMessage
+    action_messages::{Action, Event},
+    orchestration_messages::OrchestrationMessage,
+    AudioFile, ColourRgb, RelativeLocation, Service, Subtitles,
 };
 use lipsum::lipsum_words_with_rng;
 use rand::seq::{IndexedRandom, SliceRandom};
@@ -65,9 +67,7 @@ fn main() {
             let subtitles = heapless::String::try_from(lipsum::lipsum(5).as_str()).unwrap();
             let orchestrator_message: OrchestrationMessage = match rnd_service {
                 Service::Subtitle => OrchestrationMessage::Request(
-                    Event::UpdateClient(Action::ShowNewSubtitles(Subtitles {
-                        subtitles,
-                    })),
+                    Event::UpdateClient(Action::ShowNewSubtitles(Subtitles { subtitles })),
                     rnd_location.to_owned(),
                 ),
                 Service::Colour => OrchestrationMessage::Request(
@@ -97,7 +97,6 @@ fn main() {
     //     panic!("There was an error processing the target location!");
     // }
     let target_location = None;
-
 
     let orchestrator_message: OrchestrationMessage = match selected_service {
         Ok(Service::Subtitle) => on_subtitle(target_location),
@@ -161,7 +160,10 @@ fn on_play_audio(target_location: Option<RelativeLocation>) -> OrchestrationMess
     let file_extension = heapless::String::try_from(parsed_request[1]).unwrap();
 
     OrchestrationMessage::Request(
-        Event::UpdateClient(Action::PlayAudio(AudioFile{ file_name, file_extension })),
+        Event::UpdateClient(Action::PlayAudio(AudioFile {
+            file_name,
+            file_extension,
+        })),
         target_location,
     )
 }

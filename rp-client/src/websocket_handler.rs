@@ -1,11 +1,14 @@
 use base64ct::Base64;
 use base64ct::Encoding;
+use defmt::info;
 use core::fmt::Write;
+use defmt::debug;
 use embassy_net::tcp::Error as TcpError;
 use embassy_net::tcp::TcpSocket;
 use embassy_net::IpEndpoint;
 use embassy_rp::clocks::RoscRng;
 use heapless::{String, Vec};
+use postcard::{from_bytes, to_vec};
 use sha1::Digest;
 use sha1::Sha1;
 use {defmt_rtt as _, panic_probe as _};
@@ -97,16 +100,17 @@ impl<'a> WebSocket<'a> {
         let mut enc_buf = [0u8; 160];
         let accept = Base64::encode(&hasher.finalize(), &mut enc_buf).unwrap();
 
-        if !handshake_response.contains(&accept) {
+        if !handshake_response.contains(accept) {
             return Err(WsError::HandshakeFailed);
         }
 
+        info!("Connection successfully established with lamarrs server!");
         Ok(WebSocket { socket })
     }
 
-    /// Send to the server a string message.
-    pub async fn send_text(&mut self, message: &str) -> Result<(), WsError> {
-        let payload = message.as_bytes();
+    /// Send to the server a Binary message.
+    pub async fn send_bytes(&mut self, payload: &[u8]) -> Result<(), WsError> {
+        debug!("Payload to be send is: {}, len: {}", payload, payload.len());
         // According to a faily small research I've made,
         // embedded systems or no_std implementations often handle frames in chunks (e.g.<= 4096 bytes)
         // to avoid large buffers.
@@ -120,9 +124,9 @@ impl<'a> WebSocket<'a> {
         // FIN + Opcode(text)
         // FIN = 1 → final frame (not fragmented)
         // RSV1–3 = 0
-        // Opcode = 0x1 → text
+        // Opcode = 0x2 > Binary
         // The OR operator combines the bits.
-        let b0 = 0x80u8 | 0x01u8;
+        let b0 = 0x80u8 | 0x02u8;
         let mut header = [0u8; 6];
         header[0] = b0;
         // Similar to the previous entry, combines MASK + Payload length

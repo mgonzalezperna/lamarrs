@@ -1,1 +1,1 @@
-workspace = {members = [ "client","server", "lamarrs-utils", "web-ui", "orchestrator"], resolver = "2" }
+workspace = {members = [ "client","server", "lamarrs-utils", "orchestrator", "rp-client"], resolver = "2" }
