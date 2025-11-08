@@ -1,8 +1,8 @@
-mod services;
 mod server_handler;
+mod services;
 
 use clap::{Parser, ValueEnum};
-use color_eyre::eyre::{Result, WrapErr, eyre};
+use color_eyre::eyre::{eyre, Result, WrapErr};
 use std::path::PathBuf;
 //use lamarrs_utils::RelativeLocation;
 use http::Uri;
@@ -11,10 +11,13 @@ use tracing_subscriber::{
     filter::ParseError, fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter,
 };
 
+use crate::{
+    server_handler::{Client, ServerHandlerError},
+    services::playback_service::{PlaybackService, PlaybackServiceError},
+};
 use lamarrs_utils::{AudioFile, ColourRgb, Service as ServerService};
 use std::path::Path;
 use tokio::sync::mpsc::Sender;
-use crate::{server_handler::{Client, ServerHandlerError}, services::playback_service::{PlaybackService, PlaybackServiceError}};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -39,9 +42,9 @@ pub enum InternalEventMessageClient {
 #[derive(Debug, thiserror::Error)]
 pub enum LamarrsClientError {
     #[error("Playback service failed: {0}")]
-    PlaybackService(#[from] PlaybackServiceError), 
+    PlaybackService(#[from] PlaybackServiceError),
     #[error("Server handler failed: {0}")]
-    ServerHandler(#[from] ServerHandlerError), 
+    ServerHandler(#[from] ServerHandlerError),
     #[error("There was an error configuring the Lamarrs client: {}", err_desc)]
     ClientConfig { err_desc: String },
 }
