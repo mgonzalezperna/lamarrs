@@ -16,13 +16,13 @@ pub async fn async_input_handler(mut async_input: Input<'static>, mut control: C
     // Create sender for button.
     let button_sender = ASYNC_GPIO_INPUT_CHANNEL.sender();
     defmt::info!("Button handler started. Led off.");
-    control.gpio_set(0, true).await;
+    control.gpio_set(0, false).await;
     loop {
-        async_input.wait_for_low().await;
-        defmt::debug!("Button interruption received. Led on.");
-        control.gpio_set(0, false).await;
-        let interruption_starttime = Instant::now();
         async_input.wait_for_high().await;
+        defmt::debug!("Button interruption received. Led on.");
+        control.gpio_set(0, true).await;
+        let interruption_starttime = Instant::now();
+        async_input.wait_for_low().await;
         let interruption_endtime = Instant::now();
         let duration = interruption_endtime - interruption_starttime; // Button pressed `Duration`
         let duration_ms = duration.as_millis(); // Convert to milliseconds
@@ -36,6 +36,6 @@ pub async fn async_input_handler(mut async_input: Input<'static>, mut control: C
             _ => button_sender.send(crate::GpioInputEvents::Retrigger).await,
         };
         defmt::debug!("Button interruption finished. Led off.");
-        control.gpio_set(0, true).await;
+        control.gpio_set(0, false).await;
     }
 }
