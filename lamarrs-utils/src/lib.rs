@@ -6,6 +6,7 @@ pub mod exchange_messages;
 pub mod orchestration_messages;
 // pub mod midi_event;  I don´t know if this lib is no_std and I don´t need MIDI it right now.
 
+use core::fmt;
 use heapless::String;
 use serde::{ser::SerializeStruct, Deserialize, Deserializer, Serialize, Serializer};
 use strum::{Display, EnumIter};
@@ -22,32 +23,24 @@ pub enum RelativeLocation {
 /// Client data, relevant to identify itself and to update the location if needed.
 #[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
 pub struct ClientIdAndLocation {
-    pub id: Uuid,
+    pub uuid: Uuid,
     pub location: Option<RelativeLocation>,
 }
 
 impl ClientIdAndLocation {
-    pub fn new(id: Uuid, location: Option<RelativeLocation>) -> Self {
-        Self {id, location}
+    pub fn new(uuid: Uuid, location: Option<RelativeLocation>) -> Self {
+        Self { uuid, location }
     }
 }
 
-// Put this under a feature?
-// impl fmt::Display for ClientIdAndLocation {
-//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-//         match (self.uuid, self.location.clone()) {
-//             (None, _) => write!(f, "(Unregistered Subscriber, {})", self.addr),
-//             (Some(uuid), None) => {
-//                 write!(f, "(id:{}, location: Unknown, address:{})", uuid, self.addr)
-//             }
-//             (Some(uuid), Some(location)) => write!(
-//                 f,
-//                 "(id:{}, location:{}, address:{})",
-//                 uuid, location, self.addr
-//             ),
-//         }
-//     }
-// }
+impl fmt::Display for ClientIdAndLocation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match (&self.uuid, &self.location) {
+            (uuid, None) => write!(f, "(id:{:?}, location: Unknown)", uuid),
+            (uuid, Some(location)) => write!(f, "(id:{:?}, location:{})", uuid, location),
+        }
+    }
+}
 
 /// List of all the currently supported services.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, EnumIter, Display)]
@@ -67,10 +60,13 @@ pub struct ColourRgb {
 
 impl ColourRgb {
     pub fn new(red: u8, green: u8, blue: u8) -> Self {
-        Self {r: red, g: green, b: blue}
+        Self {
+            r: red,
+            g: green,
+            b: blue,
+        }
     }
 }
-
 
 /* ################################################################################################*/
 
@@ -156,7 +152,11 @@ impl AudioFile {
     pub fn file_name_with_extension(&self) -> String<55> {
         let mut file_name_with_extension: String<55> = String::new();
         use core::fmt::Write;
-        let _ = write!(file_name_with_extension, "{}.{}", self.file_name, self.file_extension);
+        let _ = write!(
+            file_name_with_extension,
+            "{}.{}",
+            self.file_name, self.file_extension
+        );
         file_name_with_extension
     }
 }
