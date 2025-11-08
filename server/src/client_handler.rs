@@ -7,7 +7,11 @@ use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use lamarrs_utils::action_messages::Event;
 use lamarrs_utils::exchange_messages::{AckResult, ExchangeMessage, NackResult};
-use tokio::net::TcpStream;
+use postcard::to_allocvec;
+use tokio::{
+    net::TcpStream,
+    time::{timeout, Duration},
+};
 use tokio_tungstenite::tungstenite::{self, Message as TungsteniteMessage};
 
 use tokio_tungstenite::{accept_async, WebSocketStream as TungsteniteWebSocketStream};
@@ -25,8 +29,8 @@ pub enum ClientHandlerError {
     FailedToConnectWithSubscriber,
     #[error("Error during the websocket handshake occurred")]
     WsError(#[from] tungstenite::error::Error),
-    #[error("Suscriber connection lost")]
-    SuscriberConnectionLost,
+    #[error("Client connection lost with: {client_id}")]
+    ConnectionLost { client_id: String },
     #[error("Valid Action message received from an unregistered Client: {0}")]
     UnregisteredSubscriber(String),
     #[error("Malformed payload received from an unidentified Client: {0}")]
@@ -41,6 +45,11 @@ pub enum ClientHandlerError {
     ),
 }
 
+enum ClientWire {
+    Binary,
+    Text,
+}
+
 pub struct Client {
     id: Option<ClientIdAndLocation>,
 
@@ -51,6 +60,8 @@ pub struct Client {
     sender: Sender<ExchangeMessage>,
     inbox: Receiver<ExchangeMessage>,
     clock: MockableClock,
+    watchdog_sent: bool,
+    wire: ClientWire,
 }
 
 impl Client {
@@ -69,6 +80,8 @@ impl Client {
             sender,
             inbox,
             clock: MockableClock::Real,
+            watchdog_sent: false,
+            wire: ClientWire::Binary,
         }
     }
 
@@ -86,23 +99,61 @@ impl Client {
     pub async fn run(&mut self, stream: TcpStream) -> Result<(), ClientHandlerError> {
         // Creates the Sink and Stream.
         let (mut remote_sender, mut remote_inbox) = self.accept_and_connect(stream).await?;
+        let connection_watchdog_timer = Duration::from_secs(5);
 
         loop {
             tokio::select! {
                 // Receive messages from the remote Client via websocket connection
-                msg = remote_inbox.next() => {
-                    info!(?msg, "New message from remote Client via websocket");
-                    // TODO: if 3 UnregisteredSubscriber messages are received, terminate the connection.
-                    self.handle_ws_message(msg, &mut remote_sender).await?;
+                maybe_message = timeout(connection_watchdog_timer, remote_inbox.next()) => {
+                    match maybe_message {
+                        Ok(msg) => {
+                            info!(?msg, "New message from remote Client via websocket");
+                            // TODO: if 3 UnregisteredSubscriber messages are received, terminate the connection.
+                            self.handle_ws_message(msg, &mut remote_sender).await?;
+                        }
+                        Err(_) => {
+                            warn!("Watchdog state: {:?}", self.watchdog_sent);
+                            if self.watchdog_sent {
+                                error!("{:?} is irresponsive, proceeding to close the connection", self.id);
+                                if let Some(client_id) = &self.id {
+                                    self.subtitles_service.send(InternalEventMessageServer::RemoveTargetClient(client_id.clone())).await?;
+                                    self.colour_service.send(InternalEventMessageServer::RemoveTargetClient(client_id.clone())).await?;
+                                    self.playback_service.send(InternalEventMessageServer::RemoveTargetClient(client_id.clone())).await?;
+                                }
+                                break Err(ClientHandlerError::ConnectionLost { client_id: format!("{:?}", self.id) })
+                            }
+                            match self.wire {
+                                ClientWire::Binary => {
+                                    match to_allocvec(&ExchangeMessage::Heartbeat) {
+                                        Ok(binary_message) =>  remote_sender.send(TungsteniteMessage::Binary(binary_message.into())).await?,
+                                        Err(_) => error!("Heartbeat could not be converted to Binary. Message was not sent.")
+                                    }
+                                }
+                                ClientWire::Text => match serde_json::to_string(&ExchangeMessage::Heartbeat) {
+                                        Ok(string_message) => remote_sender.send(TungsteniteMessage::Text(string_message.into())).await?,
+                                        Err(_) => error!("Heartbeat could not be converted to Binary. Message was not sent.")
+                                }
+                            };
+                            self.watchdog_sent = true;
+                        }
+                    }
                 }
 
                 // Receive messages from any other actors
                 msg = self.inbox.recv() => {
                     info!(?msg, "Sending message to remote Client via websocket");
                     if let Some(message) = msg {
-                        match serde_json::to_string(&message) {
-                            Ok(string_message) => remote_sender.send(TungsteniteMessage::Text(string_message.into())).await?,
-                            Err(_) => error!("Message {:?} to be relayed to Client could not be converted to String. Message was not sent.", message)
+                        match self.wire{
+                            ClientWire::Binary => {
+                                match to_allocvec(&message) {
+                                    Ok(binary_message) =>  remote_sender.send(TungsteniteMessage::Binary(binary_message.into())).await?,
+                                    Err(_) => error!("Message {:?} to be relayed to Client could not be converted to Binary. Message was not sent.", message)
+                                }
+                            }
+                            ClientWire::Text => match serde_json::to_string(&message) {
+                                    Ok(string_message) => remote_sender.send(TungsteniteMessage::Text(string_message.into())).await?,
+                                    Err(_) => error!("Message {:?} to be relayed to Client could not be converted to String. Message was not sent.", message)
+                            }
                         }
                     }
                 }
@@ -145,7 +196,7 @@ impl Client {
             // Process inbound messages from devices that send json using serde_json.
             Some(Ok(TungsteniteMessage::Text(string_payload))) => {
                 debug!(?string_payload, "Inbound Text Payload");
-                let payload_as_str_result= serde_json::from_str(&string_payload.to_string());
+                let payload_as_str_result = serde_json::from_str(&string_payload.to_string());
                 let payload = match payload_as_str_result {
                     Ok(payload) => payload,
                     Err(error) => {
@@ -161,46 +212,41 @@ impl Client {
                             }
                             Err(_) => error!("Client can't be notified of the error, there was an issue parsing the error message.")
                         }
-                        return Err(ClientHandlerError::UnrecognizableMessage(string_payload.to_string()))
+                        return Err(ClientHandlerError::UnrecognizableMessage(
+                            string_payload.to_string(),
+                        ));
                     }
                 };
                 if let None = self.id {
+                    // From now on, we are only going to talk Text with this client.
+                    self.wire = ClientWire::Text;
                     // We must get the client a identifier -and lamarrs version in the future-
                     // to secure the client is sane and "orchesteable".
-                    self.on_unregistered_subscriber_message(payload)
-                        .await?
+                    self.on_unregistered_subscriber_message(payload).await?
                 } else {
                     // If the client has been already identified and is talkable for this server
                     // we can process its messages safely.
-                    self.on_subscriber_message(payload)
-                        .await?
+                    self.on_subscriber_message(payload).await?
                 }
             }
-            // From embedded devices is easier to just send the data encoded in Bytes using postcard.
+            // The embedded devices send the data encoded in Bytes using postcard.
             Some(Ok(TungsteniteMessage::Binary(bytes_payload))) => {
                 debug!(?bytes_payload, "Inbound Binary Payload");
-                let payload = postcard::from_bytes::<ExchangeMessage>(&bytes_payload).map_err(|e| {
-                    ClientHandlerError::FailureDecodingBinaryExchangeMessage(e.to_string())
-                })?;
+                let payload =
+                    postcard::from_bytes::<ExchangeMessage>(&bytes_payload).map_err(|e| {
+                        ClientHandlerError::FailureDecodingBinaryExchangeMessage(e.to_string())
+                    })?;
                 if let None = self.id {
+                    // From now on, we are only going to talk Binary with this client.
+                    self.wire = ClientWire::Binary;
                     // We must get the client a identifier -and lamarrs version in the future-
                     // to secure the client is sane and "orchesteable".
-                    self.on_unregistered_subscriber_message(payload)
-                        .await?
+                    self.on_unregistered_subscriber_message(payload).await?
                 } else {
                     // If the client has been already identified and is talkable for this server
                     // we can process its messages safely.
-                    self.on_subscriber_message(payload)
-                        .await?
+                    self.on_subscriber_message(payload).await?
                 }
-            }
-            // Handle ping responses
-            Some(Ok(TungsteniteMessage::Ping(data))) => {
-                debug!(?data, "Ping");
-                outgoing
-                    .send(tungstenite::Message::Pong(data.clone()))
-                    .await?;
-                debug!(?data, "Pong");
             }
             // Handle connection closed
             Some(Ok(TungsteniteMessage::Close(_))) | None => {
@@ -209,7 +255,9 @@ impl Client {
                 } else {
                     warn!("WebSocket connection closed. Unknown reason.");
                 }
-                return Err(ClientHandlerError::SuscriberConnectionLost);
+                return Err(ClientHandlerError::ConnectionLost {
+                    client_id: format!("{:?}", self.id),
+                });
             }
             // Ignore unsuported messages
             Some(Ok(message)) => {
@@ -235,11 +283,37 @@ impl Client {
     ) -> Result<(), ClientHandlerError> {
         match exchange_message {
             ExchangeMessage::Request(Event::Register(client_id_and_location)) => {
-                info!("Registring new Client {client_id_and_location:?}");
-                self.id = Some(client_id_and_location);
+                info!("Registering new Client {client_id_and_location:?}");
+                self.id = Some(client_id_and_location.clone());
+                // Recreate sender in all services the if the client is reconnecting and was already subscribed.
+                self.subtitles_service
+                    .send(InternalEventMessageServer::UpdateClientData(
+                        client_id_and_location.clone(),
+                        self.sender.clone(),
+                    ))
+                    .await?;
+                self.colour_service
+                    .send(InternalEventMessageServer::UpdateClientData(
+                        client_id_and_location.clone(),
+                        self.sender.clone(),
+                    ))
+                    .await?;
+                self.playback_service
+                    .send(InternalEventMessageServer::UpdateClientData(
+                        client_id_and_location.clone(),
+                        self.sender.clone(),
+                    ))
+                    .await?;
+                // Confirm success to client
                 self.sender
                     .send(ExchangeMessage::Ack(AckResult::Success))
                     .await;
+                Ok(())
+            }
+            ExchangeMessage::HeartbeatAck => {
+                info!("HeartbeatAck received by Unregistered device.");
+                self.watchdog_sent = false;
+                info!("Watchdog reset: {}", self.watchdog_sent);
                 Ok(())
             }
             _ => {
@@ -250,7 +324,9 @@ impl Client {
                 self.sender
                     .send(ExchangeMessage::Nack(NackResult::NotSubscribed))
                     .await;
-                Err(ClientHandlerError::UnregisteredSubscriber(exchange_message.to_string()))
+                Err(ClientHandlerError::UnregisteredSubscriber(
+                    exchange_message.to_string(),
+                ))
             }
         }
     }
@@ -276,13 +352,21 @@ impl Client {
                     self.update_location(client_id_and_location).await
                 }
                 _ => {
-                        warn!(?action, "Requested Event by Client {:?} is not supported. Client may be sending Server Event?", self.id);
+                    warn!(?action, "Requested Event by Client {:?} is not supported. Client may be sending Server Event?", self.id);
                     self.sender
                         .send(ExchangeMessage::Nack(NackResult::Failed))
                         .await;
-                    Err(ClientHandlerError::InvalidExchangeMessage(action.to_string()))
+                    Err(ClientHandlerError::InvalidExchangeMessage(
+                        action.to_string(),
+                    ))
                 }
             },
+            ExchangeMessage::HeartbeatAck => {
+                info!("HeartbeatAck received by {:?}.", self.id);
+                self.watchdog_sent = false;
+                info!("Watchdog reset: {}", self.watchdog_sent);
+                Ok(())
+            }
             _ => {
                 warn!(
                     ?exchange_message,
@@ -291,7 +375,9 @@ impl Client {
                 self.sender
                     .send(ExchangeMessage::Nack(NackResult::Failed))
                     .await;
-                Err(ClientHandlerError::InvalidExchangeMessage(exchange_message.to_string()))
+                Err(ClientHandlerError::InvalidExchangeMessage(
+                    exchange_message.to_string(),
+                ))
             }
         }
     }
@@ -319,10 +405,7 @@ impl Client {
         service: Service,
         client_id_and_location: ClientIdAndLocation,
     ) -> Result<(), ClientHandlerError> {
-        let message = InternalEventMessageServer::RemoveTargetClient(
-            client_id_and_location,
-            self.sender.clone(),
-        );
+        let message = InternalEventMessageServer::RemoveTargetClient(client_id_and_location);
         match service {
             Service::Subtitle => Ok(self.subtitles_service.send(message).await?),
             Service::Colour => Ok(self.colour_service.send(message).await?),
@@ -336,64 +419,17 @@ impl Client {
         client_id_and_location: ClientIdAndLocation,
     ) -> Result<(), ClientHandlerError> {
         self.subtitles_service
-            .send(InternalEventMessageServer::UpdateLocation(
+            .send(InternalEventMessageServer::UpdateClientData(
                 client_id_and_location.clone(),
                 self.sender.clone(),
             ))
             .await?;
         self.colour_service
-            .send(InternalEventMessageServer::UpdateLocation(
+            .send(InternalEventMessageServer::UpdateClientData(
                 client_id_and_location,
                 self.sender.clone(),
             ))
             .await?;
         Ok(())
-    }
-
-    /// Reconnects and recreate inbox.
-    /// This is vestigial from previous implementations and will be recycled
-    /// later when working on recovery mechanisms.
-    async fn recreate_inbox(
-        &mut self,
-        inbox: &mut Receiver<ExchangeMessage>,
-    ) -> Result<(), ClientHandlerError> {
-        info!("Reconnecting!!");
-        // Close inbox, so no new messages can arrive until we reconnect
-        inbox.close();
-        info!("Trying to recover suscriptions");
-        *inbox = self.reset_inbox().await?;
-        Ok(())
-    }
-
-    /// Resets the inbox for the [`WebSocket`]
-    /// This is vestigial from previous implementations and will be recycled
-    /// later when working on recovery mechanisms.
-    async fn reset_inbox(&mut self) -> Result<Receiver<ExchangeMessage>, ClientHandlerError> {
-        let (sender, inbox) = channel(32);
-        self.sender = sender;
-
-        // TODO: rebuild the senders
-        // self.subtitles
-        //     .send(SubtitleMessage::UpdateSubscription(SusbcriptionData {
-        //         sender_id: self.id.uuid.unwrap(),
-        //         sender: self.sender.clone(),
-        //         location: self.id.location.clone().unwrap(),
-        //     }))
-        //     .await;
-        // self.color
-        //     .send(ColorMessage::UpdateSubscription(SusbcriptionData {
-        //         sender_id: self.id.uuid.unwrap(),
-        //         sender: self.sender.clone(),
-        //         location: self.id.location.clone().unwrap(),
-        //     }))
-        //     .await;
-        // self.midi
-        //     .send(MidiMessage::UpdateSubscription(SusbcriptionData {
-        //         sender_id: self.id.uuid.unwrap(),
-        //         sender: self.sender.clone(),
-        //         location: self.id.location.clone().unwrap(),
-        //     }))
-        //     .await;
-        Ok(inbox)
     }
 }
