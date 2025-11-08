@@ -2,6 +2,7 @@
 #![no_main]
 #![allow(async_fn_in_trait)]
 
+mod async_gpio_input_handler;
 mod oled_handler;
 mod server_handler;
 mod websocket_handler;
@@ -13,27 +14,17 @@ use embassy_executor::Spawner;
 use embassy_net::{Config, IpAddress, IpEndpoint, Ipv4Address, StackResources};
 use embassy_rp::bind_interrupts;
 use embassy_rp::clocks::RoscRng;
+use embassy_rp::gpio::{Input, Level, Output, Pull};
 use embassy_rp::i2c::{self, Config as Config_i2c, InterruptHandler as InterruptHandler_i2c};
 use embassy_rp::peripherals::{DMA_CH0, I2C1, PIO0};
 use embassy_rp::pio::{InterruptHandler, Pio};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel;
 
+use crate::async_gpio_input_handler::{async_input_handler, GpioInputEvents};
 use crate::oled_handler::{oled_ssd1306_task, OledEvents};
-use heapless::String;
-use lamarrs_utils::action_messages::Action;
-use lamarrs_utils::exchange_messages::ExchangeMessage;
-use lamarrs_utils::ClientIdAndLocation;
-use serde::Serialize;
-use ssd1306::mode::{BufferedGraphicsMode, DisplayConfig};
-use ssd1306::prelude::{DisplayRotation, I2CInterface};
-use ssd1306::size::DisplaySize128x64;
-use ssd1306::{I2CDisplayInterface, Ssd1306};
 use static_cell::StaticCell;
-use uuid::Builder;
 
-mod server_handler;
-mod websocket_handler;
 use {defmt_rtt as _, panic_probe as _};
 
 bind_interrupts!(struct Irqs {
@@ -44,13 +35,6 @@ bind_interrupts!(struct Irqs {
 const WIFI_NETWORK: &str = ""; // change to your network SSID
 const WIFI_PASSWORD: &str = ""; // change to your network password
 
-/// Events that worker tasks send to the OLED_CHANNEL.
-enum OledEvents {
-    ConnectedToWifi(bool),         // Connected stablished with router.
-    ConnectedToOrchestrator(bool), // Connected to Lamarrs orchestrator.
-    RegiteredWithUuid(String<20>), // Once registered, report the temporary lamarrs device UUID to the screen for easy identification.
-    WsMessage(String<100>),        // New Message received from orchestrator.
-}
 /// Channel for oled/screen related messages.
 static OLED_CHANNEL: channel::Channel<CriticalSectionRawMutex, OledEvents, 10> =
     channel::Channel::new();
@@ -174,5 +158,10 @@ async fn main(spawner: Spawner) {
     let target = IpEndpoint::new(IpAddress::Ipv4(lamarrs_ip_address), 8080);
     spawner
         .spawn(server_handler::server_handler(stack, target))
+        .unwrap();
+
+    let async_input = Input::new(peripherals.PIN_13, Pull::Down);
+    spawner
+        .spawn(async_input_handler(async_input, control))
         .unwrap();
 }
