@@ -13,3 +13,4 @@ serde = { version = "1.0.202", default-features = false, features = ["derive"] }
 uuid = { version = "1.18.1", default-features = false, features = ["serde"]}
 #oxisynth = "0.1.0" We won´t be supporting MIDI by now.
 heapless = "0.9.1"
+defmt = "1.0.1"
