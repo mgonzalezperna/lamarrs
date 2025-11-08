@@ -1,6 +1,7 @@
 use core::fmt::Write;
 use core::panic;
 
+use defmt::{debug, info};
 use embassy_rp::i2c::{Async, I2c};
 use embassy_rp::peripherals::I2C1;
 use embedded_graphics::primitives::{PrimitiveStyleBuilder, Rectangle};
@@ -23,7 +24,7 @@ use crate::OLED_CHANNEL;
 /// Events that worker tasks send to the OLED_CHANNEL.
 pub enum OledEvents {
     ConnectedToWifi(bool),         // Connected stablished with router.
-    ConnectedToOrchestrator(bool), // Connected to Lamarrs orchestrator.
+    ConnectedToLamarrs(bool, Option<String<15>>), // Connected to Lamarrs orchestrator.
     RegiteredWithUuid(String<36>), // Once registered, report the temporary lamarrs device UUID to the screen for easy identification.
     WsMessage(ExchangeMessage),    // New Message received from orchestrator.
 }
@@ -80,55 +81,65 @@ pub async fn oled_ssd1306_task(i2c1: I2c<'static, I2C1, Async>) {
                 let mut message: String<50> = String::new();
                 write!(&mut message, "WiFi: {}", status).unwrap();
                 update_line(&mut display, 0, message.as_str(), 10);
-                defmt::debug!("Showing WiFi connection status in Oled");
+                debug!("Showing WiFi connection status in Oled");
             }
-            OledEvents::ConnectedToOrchestrator(bool) => {
+            OledEvents::ConnectedToLamarrs(bool, maybe_extra) => {
+                debug!("New update on Lamarrs status {:?}, {:?}", bool, maybe_extra);
                 let status = match bool {
                     true => "on",
                     false => "off",
                 };
                 let mut message: String<50> = String::new();
-                write!(&mut message, "Lamarrs: {}", status).unwrap();
+                match maybe_extra {
+                    Some(extra) => write!(&mut message, "Lamrs: {} {}", status, extra).unwrap(),
+                    None => write!(&mut message, "Lamrs: {}", status).unwrap()
+                }
                 update_line(&mut display, 16, message.as_str(), 10);
-                defmt::debug!("Showing orchestrator connection status in Oled");
+                debug!("Showing orchestrator connection status in Oled");
             }
             OledEvents::RegiteredWithUuid(uuid) => {
                 let mut message: String<50> = String::new();
                 write!(&mut message, "{}", uuid).unwrap();
                 update_line(&mut display, 32, message.as_str(), 10);
-                defmt::debug!("Showing UUID in Oled");
+                debug!("Showing UUID in Oled");
             }
             OledEvents::WsMessage(exchange_message) => {
-                let message_to_show = match exchange_message {
-                    ExchangeMessage::Ack(ack_result) => match ack_result {
-                        AckResult::Success => "Success!",
-                        AckResult::UpdatedSubscription => "Updated subscription",
-                        AckResult::UpdatedLocation => "Updated location",
-                    },
-                    ExchangeMessage::Nack(nack_result) => match nack_result {
-                        NackResult::AlreadySubscribed => "Rejected: Already subscribed",
-                        NackResult::NotSubscribed => "Rejected: Not subscribed",
-                        NackResult::Failed => "Failed",
-                    },
-                    ExchangeMessage::Scene(event) => {
-                        if let ActionEvent::PerformAction(action) = event {
-                            match action {
-                                Action::ShowNewSubtitles(_) => "New subtitles",
-                                Action::ChangeColour(_) => "New Colour",
-                                Action::PlayAudio(_) => "Play audio file",
+                // Heartbeat messages will not be explicitly shown in the oled, but added to the line reporting Lamarrs status.
+                if let ExchangeMessage::Heartbeat = &exchange_message {
+                    let string_test: String<15> = String::try_from("Watchdog ok!").unwrap();
+                    info!("Relaying watchdog to other line: {:?}", string_test);
+                    OLED_CHANNEL.send(OledEvents::ConnectedToLamarrs(true, Some(String::try_from("Watchdog ok!").unwrap()))).await;
+                } else {
+                    // This buffer will be used by certain structs to show themselves as &str.
+                    // By now only Action implement the `as_str` function, but later we will
+                    // implement them for all as a Trait.
+                    let mut write_buffer = String::<128>::new();
+                    let message_to_show = match exchange_message {
+                        ExchangeMessage::Ack(ack_result) => match ack_result {
+                            AckResult::Success => "Success!",
+                            AckResult::UpdatedSubscription => "Updated subscription",
+                            AckResult::UpdatedLocation => "Updated location",
+                        },
+                        ExchangeMessage::Nack(nack_result) => match nack_result {
+                            NackResult::AlreadySubscribed => "Rejected: Already subscribed",
+                            NackResult::NotSubscribed => "Rejected: Not subscribed",
+                            NackResult::Failed => "Failed",
+                        },
+                        ExchangeMessage::Scene(event) => {
+                            if let ActionEvent::PerformAction(action) = event {
+                                action.as_str(&mut write_buffer)
+                            } else {
+                                panic!("Invalid Scene event reported to the Oled screen.")
                             }
-                        } else {
-                            panic!("Invalid Scene event reported to the Oled screen.")
                         }
-                    }
-                    ExchangeMessage::Error(error_description) => {
-                        &error_description.error_descr.clone()
-                    }
-                    ExchangeMessage::Heartbeat => "Heartbeat received",
-                    _ => unreachable!("Oled received an unsuported message to show."),
-                };
-                update_line(&mut display, 48, message_to_show, 10);
-                defmt::debug!("Showing lamarrs payload in Oled");
+                        ExchangeMessage::Error(error_description) => {
+                            &error_description.error_descr.clone()
+                        }
+                        _ => unreachable!("Oled received an unsuported message to show."),
+                    };
+                    update_line(&mut display, 48, message_to_show, 10);
+                    defmt::debug!("Updated Oled");
+                }
             }
         }
     }

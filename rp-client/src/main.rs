@@ -77,7 +77,7 @@ async fn main(spawner: Spawner) {
     let oled_sender = OLED_CHANNEL.sender();
     oled_sender.send(OledEvents::ConnectedToWifi(false)).await;
     oled_sender
-        .send(OledEvents::ConnectedToOrchestrator(false))
+        .send(OledEvents::ConnectedToLamarrs(false, None))
         .await;
 
     let fw = include_bytes!("../cyw43-firmware/43439A0.bin");

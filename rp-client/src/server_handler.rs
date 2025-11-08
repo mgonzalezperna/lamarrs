@@ -7,7 +7,9 @@ use embassy_rp::clocks::RoscRng;
 use embassy_time::Duration;
 use heapless::String;
 use lamarrs_utils::{
-    action_messages::Event, exchange_messages::ExchangeMessage, ClientIdAndLocation, Service,
+    action_messages::{Action, Event},
+    exchange_messages::ExchangeMessage,
+    ClientIdAndLocation, Service,
 };
 use uuid::Builder;
 
@@ -52,7 +54,7 @@ pub async fn server_handler(stack: embassy_net::Stack<'static>, target: IpEndpoi
             Ok(mut websocket) => {
                 // Notifies the screen that it is connected to lamarrs.
                 oled_sender
-                    .send(OledEvents::ConnectedToOrchestrator(true))
+                    .send(OledEvents::ConnectedToLamarrs(true, None))
                     .await;
 
                 // Sends initial basic registration message to lamarrs server.
@@ -94,12 +96,17 @@ pub async fn server_handler(stack: embassy_net::Stack<'static>, target: IpEndpoi
                                     oled_sender
                                         .send(OledEvents::WsMessage(message.clone()))
                                         .await;
+                                    
+                                    // This buffer will be used by certain structs to show themselves as &str.
+                                    // By now only Action implement the `as_str` function, but later we will
+                                    // implement them for all as a Trait.
+                                    let mut write_buffer = String::<128>::new();
                                     match message {
                                         ExchangeMessage::Ack(ack_result) => info!("Last request was successful!"),
                                         ExchangeMessage::Nack(nack_result) => warn!("Last request was not accepted by the server"),
                                         ExchangeMessage::Scene(event) => {
                                             match event {
-                                                Event::PerformAction(action) => info!("Performing action!"),
+                                                Event::PerformAction(action) => info!("New action requested: {:?}", action.as_str(&mut write_buffer)),
                                                 _ => unreachable!("The Event requested is not compatible with Scene messages: {:?}", event)
                                             }
                                         }
@@ -120,6 +127,7 @@ pub async fn server_handler(stack: embassy_net::Stack<'static>, target: IpEndpoi
                                     );
                                     // Fatal: break to reconnect or close clearly. This avoids getting trapped in an infinite logging loop.
                                     if let WsError::InvalidResponse = e {
+                                        oled_sender.send(OledEvents::ConnectedToLamarrs(false, None)).await;
                                         break;
                                     }
                                 }
