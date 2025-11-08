@@ -6,13 +6,13 @@ use crate::{AudioFile, ClientIdAndLocation, ColourRgb, Service, Subtitles};
 /// These are the payloads the clients will be sending inside the Exchange Messages.
 /// In the future, they may be also the payloads between services. Some feature gating
 /// will be required for it.
-#[derive(Deserialize, Serialize, PartialEq, Debug, Display)]
+#[derive(Deserialize, Serialize, PartialEq, Debug, Display, Clone)]
 pub enum Event {
     Register(ClientIdAndLocation),
     SuscribeToService(Service, ClientIdAndLocation),
     UnsubscribeFromService(Service, ClientIdAndLocation),
     UpdateLocation(ClientIdAndLocation),
-    UpdateClient(Action),
+    PerformAction(Action),
 }
 
 /// Internal message types to be transmited between actors inside Lamarrs.
