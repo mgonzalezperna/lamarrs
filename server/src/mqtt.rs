@@ -72,11 +72,11 @@ impl MqttInterface {
             Ok::<OrchestrationMessage, serde_json::Error>(message) => match message {
                 OrchestrationMessage::Request(action_message, relative_location) => {
                     match action_message {
-                        lamarrs_utils::action_messages::Event::UpdateClient(service_action) => {
+                        lamarrs_utils::action_messages::Event::PerformAction(service_action) => {
                             match &service_action {
                                 lamarrs_utils::action_messages::Action::ShowNewSubtitles(_) => {
                                     self.subtitles
-                                        .send(InternalEventMessageServer::UpdateClients(
+                                        .send(InternalEventMessageServer::OrchestrateClients(
                                             service_action,
                                             relative_location,
                                         ))
@@ -84,7 +84,7 @@ impl MqttInterface {
                                 }
                                 lamarrs_utils::action_messages::Action::ChangeColour(_) => {
                                     self.colour
-                                        .send(InternalEventMessageServer::UpdateClients(
+                                        .send(InternalEventMessageServer::OrchestrateClients(
                                             service_action,
                                             relative_location,
                                         ))
@@ -92,7 +92,7 @@ impl MqttInterface {
                                 }
                                 lamarrs_utils::action_messages::Action::PlayAudio(_) => {
                                     self.playback_audio
-                                        .send(InternalEventMessageServer::UpdateClients(
+                                        .send(InternalEventMessageServer::OrchestrateClients(
                                             service_action,
                                             relative_location,
                                         ))
