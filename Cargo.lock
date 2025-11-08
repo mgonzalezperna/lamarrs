@@ -2344,6 +2344,7 @@ dependencies = [
  "http",
  "inquire",
  "lamarrs-utils",
+ "postcard",
  "rodio",
  "serde",
  "serde_json",
@@ -2457,6 +2458,7 @@ dependencies = [
 name = "lamarrs-utils"
 version = "0.1.0"
 dependencies = [
+ "defmt 1.0.1",
  "heapless 0.9.1",
  "serde",
  "strum",
