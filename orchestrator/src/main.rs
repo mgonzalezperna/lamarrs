@@ -67,11 +67,11 @@ fn main() {
             let subtitles = heapless::String::try_from(lipsum::lipsum(5).as_str()).unwrap();
             let orchestrator_message: OrchestrationMessage = match rnd_service {
                 Service::Subtitle => OrchestrationMessage::Request(
-                    Event::UpdateClient(Action::ShowNewSubtitles(Subtitles { subtitles })),
+                    Event::PerformAction(Action::ShowNewSubtitles(Subtitles { subtitles })),
                     rnd_location.to_owned(),
                 ),
                 Service::Colour => OrchestrationMessage::Request(
-                    Event::UpdateClient(Action::ChangeColour(ColourRgb {
+                    Event::PerformAction(Action::ChangeColour(ColourRgb {
                         r: rand::random_range(0..=255),
                         g: rand::random_range(0..=255),
                         b: rand::random_range(0..=255),
@@ -118,7 +118,7 @@ fn on_subtitle(target_location: Option<RelativeLocation>) -> OrchestrationMessag
     .prompt();
     let subtitles = heapless::String::try_from(requested_subtitles.unwrap().as_str()).unwrap();
     OrchestrationMessage::Request(
-        Event::UpdateClient(Action::ShowNewSubtitles(Subtitles { subtitles })),
+        Event::PerformAction(Action::ShowNewSubtitles(Subtitles { subtitles })),
         target_location,
     )
 }
@@ -139,7 +139,7 @@ fn on_color(target_location: Option<RelativeLocation>) -> OrchestrationMessage {
         .prompt();
 
     OrchestrationMessage::Request(
-        Event::UpdateClient(Action::ChangeColour(ColourRgb {
+        Event::PerformAction(Action::ChangeColour(ColourRgb {
             r: red.unwrap(),
             g: green.unwrap(),
             b: blue.unwrap(),
@@ -160,7 +160,7 @@ fn on_play_audio(target_location: Option<RelativeLocation>) -> OrchestrationMess
     let file_extension = heapless::String::try_from(parsed_request[1]).unwrap();
 
     OrchestrationMessage::Request(
-        Event::UpdateClient(Action::PlayAudio(AudioFile {
+        Event::PerformAction(Action::PlayAudio(AudioFile {
             file_name,
             file_extension,
         })),
