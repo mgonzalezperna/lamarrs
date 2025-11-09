@@ -2,10 +2,9 @@ mod server_handler;
 mod services;
 
 use clap::{Parser, ValueEnum};
-use color_eyre::eyre::{eyre, Result, WrapErr};
-use std::path::PathBuf;
-//use lamarrs_utils::RelativeLocation;
+use color_eyre::eyre::{eyre, Result};
 use http::Uri;
+use std::path::PathBuf;
 use tracing::{debug, info};
 use tracing_subscriber::{
     filter::ParseError, fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter,
@@ -16,7 +15,6 @@ use crate::{
     services::playback_service::{PlaybackService, PlaybackServiceError},
 };
 use lamarrs_utils::{AudioFile, ColourRgb, Service as ServerService};
-use std::path::Path;
 use tokio::sync::mpsc::Sender;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");

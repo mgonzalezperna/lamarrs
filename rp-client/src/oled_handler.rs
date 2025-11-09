@@ -23,7 +23,7 @@ use crate::OLED_CHANNEL;
 
 /// Events that worker tasks send to the OLED_CHANNEL.
 pub enum OledEvents {
-    ConnectedToWifi(bool),         // Connected stablished with router.
+    ConnectedToWifi(bool), // Connected stablished with router.
     ConnectedToLamarrs(bool, Option<String<15>>), // Connected to Lamarrs orchestrator.
     RegiteredWithUuid(String<36>), // Once registered, report the temporary lamarrs device UUID to the screen for easy identification.
     WsMessage(ExchangeMessage),    // New Message received from orchestrator.
@@ -92,7 +92,7 @@ pub async fn oled_ssd1306_task(i2c1: I2c<'static, I2C1, Async>) {
                 let mut message: String<50> = String::new();
                 match maybe_extra {
                     Some(extra) => write!(&mut message, "Lamrs: {} {}", status, extra).unwrap(),
-                    None => write!(&mut message, "Lamrs: {}", status).unwrap()
+                    None => write!(&mut message, "Lamrs: {}", status).unwrap(),
                 }
                 update_line(&mut display, 16, message.as_str(), 10);
                 debug!("Showing orchestrator connection status in Oled");
@@ -108,7 +108,12 @@ pub async fn oled_ssd1306_task(i2c1: I2c<'static, I2C1, Async>) {
                 if let ExchangeMessage::Heartbeat = &exchange_message {
                     let string_test: String<15> = String::try_from("Watchdog ok!").unwrap();
                     info!("Relaying watchdog to other line: {:?}", string_test);
-                    OLED_CHANNEL.send(OledEvents::ConnectedToLamarrs(true, Some(String::try_from("Watchdog ok!").unwrap()))).await;
+                    OLED_CHANNEL
+                        .send(OledEvents::ConnectedToLamarrs(
+                            true,
+                            Some(String::try_from("Watchdog ok!").unwrap()),
+                        ))
+                        .await;
                 } else {
                     // This buffer will be used by certain structs to show themselves as &str.
                     // By now only Action implement the `as_str` function, but later we will

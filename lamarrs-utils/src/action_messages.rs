@@ -28,7 +28,7 @@ pub enum Action {
 }
 
 impl Action {
-    pub fn as_str<'a> (&self, write_buffer: &'a mut heapless::String<128>) -> &'a str {
+    pub fn as_str<'a>(&self, write_buffer: &'a mut String<128>) -> &'a str {
         write_buffer.clear();
         match self {
             Action::ShowNewSubtitles(subtitles) => {
