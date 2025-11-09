@@ -1,8 +1,9 @@
 use base64ct::Base64;
 use base64ct::Encoding;
-use defmt::info;
 use core::fmt::Write;
 use defmt::debug;
+use defmt::info;
+use embassy_net::tcp::ConnectError;
 use embassy_net::tcp::Error as TcpError;
 use embassy_net::tcp::TcpSocket;
 use embassy_net::IpEndpoint;
@@ -15,6 +16,7 @@ use {defmt_rtt as _, panic_probe as _};
 
 #[derive(Debug, defmt::Format)]
 pub enum WsError {
+    Connect(ConnectError),
     Tcp(TcpError),
     HandshakeFailed,
     InvalidResponse,
@@ -41,7 +43,7 @@ impl<'a> WebSocket<'a> {
         target: IpEndpoint,
     ) -> Result<Self, WsError> {
         let mut socket = TcpSocket::new(stack, rx_buffer, tx_buffer);
-        socket.connect(target).await.unwrap();
+        socket.connect(target).await.map_err(WsError::Connect)?;
 
         // Generate Sec Websocket Key.
         // This is required by the WS spec: https://www.rfc-editor.org/rfc/rfc6455#page-24
@@ -159,7 +161,7 @@ impl<'a> WebSocket<'a> {
     /// Places the payload into the give reading_buffer, while it
     /// returns the usize for the slice of bytes to be read from the reading_buffer
     /// in order to get the text message received.
-    pub async fn recv_text(&mut self, reading_buffer: &mut [u8]) -> Result<usize, WsError> {
+    pub async fn recv_message(&mut self, reading_buffer: &mut [u8]) -> Result<usize, WsError> {
         // As defined by the spec, a single frame with short 7-bit payload
         // must have a header with only 2 bytes.
         let mut header = [0u8; 2];
@@ -172,9 +174,9 @@ impl<'a> WebSocket<'a> {
         let fin = header[0] & 0x80 != 0;
         let opcode = header[0] & 0x0F;
 
-        // If opcode is not `1` (text) or if the FIN is not 1,
+        // If opcode is not `2` (binary) or if the FIN is not 1,
         // it must fail, as the payload is not supported by this function.
-        if !(opcode == 0x1 && fin) {
+        if !(opcode == 0x2 && fin) {
             return Err(WsError::InvalidResponse);
         }
         // Any frame coming from the server should NOT be masked, but since I can´t ensure that's the case with my server

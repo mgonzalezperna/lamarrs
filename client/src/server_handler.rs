@@ -2,13 +2,13 @@ use async_time_mock_tokio::MockableClock;
 use futures_util::{stream::SplitSink, SinkExt, StreamExt};
 use http::Uri;
 use lamarrs_utils::{
-    action_messages::{Event, Action},
+    action_messages::{Action, Event},
     exchange_messages::{ExchangeMessage, NackResult},
     ClientIdAndLocation, ErrorDescription, RelativeLocation, Service,
 };
 use tokio::{
     net::TcpStream,
-    sync::mpsc::{self, Receiver, Sender, channel},
+    sync::mpsc::{self, channel, Receiver, Sender},
 };
 use tokio_tungstenite::{
     connect_async, tungstenite::Message as TungsteniteMessage, MaybeTlsStream,
@@ -33,6 +33,8 @@ pub enum ServerHandlerError {
     InvalidExchangeMessage(String),
     #[error("Error sending an InternalMessage to Server handler")]
     SendInternalMessage(#[from] mpsc::error::SendError<InternalEventMessageClient>),
+    #[error("Fatar error deconding a binary ExchangeMessage received from Server: {0}")]
+    FailureDecodingBinaryExchangeMessage(String),
 }
 
 pub struct Client {
@@ -89,12 +91,10 @@ impl Client {
         let (mut remote_sender, mut remote_inbox) = ws_stream.split();
 
         // We add to the queue the request to Register to the Server.
-        let register_message = ExchangeMessage::Request(Event::Register(
-            ClientIdAndLocation {
-                id: self.id,
-                location: self.location.clone(),
-            },
-        ));
+        let register_message = ExchangeMessage::Request(Event::Register(ClientIdAndLocation {
+            uuid: self.id,
+            location: self.location.clone(),
+        }));
         match serde_json::to_string(&register_message) {
             // TODO: Loop and don´t progress unless ACK is received. Otherwise, panic?
             Ok(string_message) => remote_sender.send(TungsteniteMessage::Text(string_message.into())).await?,
@@ -102,8 +102,12 @@ impl Client {
         }
         /// Notify internal services that all systems are go. Services will answer with Subscribe requests.
         /// We should also process ACK, but that means refactoring the receiver. Will be done later.
-        self.audio_player.send(InternalEventMessageClient::ConnectedToServer(self.sender.clone())).await?;
-        
+        self.audio_player
+            .send(InternalEventMessageClient::ConnectedToServer(
+                self.sender.clone(),
+            ))
+            .await?;
+
         loop {
             tokio::select! {
                 // Receive messages from server via websocket connection
@@ -113,12 +117,13 @@ impl Client {
                     if let Err(error) = self.handle_ws_message(msg, &mut remote_sender).await {
                         // Some errors must stop the loop, others just inform.
                         match error {
-                            ServerHandlerError::ParseError(parse_error) => (),
-                            ServerHandlerError::Error(error) => (),
-                            ServerHandlerError::ServerConnectionLost => (),
-                            ServerHandlerError::UnrecognizableMessage(_) => (),
-                            ServerHandlerError::InvalidExchangeMessage(_) => (),
-                            ServerHandlerError::SendInternalMessage(send_error) => (),
+                            ServerHandlerError::ParseError(parse_error)=>(),
+                            ServerHandlerError::Error(error)=>(),
+                            ServerHandlerError::ServerConnectionLost=>(),
+                            ServerHandlerError::UnrecognizableMessage(_)=>(),
+                            ServerHandlerError::InvalidExchangeMessage(_)=>(),
+                            ServerHandlerError::SendInternalMessage(send_error)=>(),
+                            ServerHandlerError::FailureDecodingBinaryExchangeMessage(_) =>(),
                         }
                     }
                 }
@@ -158,7 +163,16 @@ impl Client {
         match msg {
             // Process inbound messages
             Some(Ok(TungsteniteMessage::Text(string_payload))) => {
+                debug!(?string_payload, "Inbound String Payload");
                 self.process_message(string_payload.to_string()).await?
+            }
+            Some(Ok(TungsteniteMessage::Binary(bytes_payload))) => {
+                debug!(?bytes_payload, "Inbound Binary Payload");
+                let payload =
+                    postcard::from_bytes::<ExchangeMessage>(&bytes_payload).map_err(|e| {
+                        ServerHandlerError::FailureDecodingBinaryExchangeMessage(e.to_string())
+                    })?;
+                self.process_message(payload.to_string()).await?
             }
             // Handle ping responses
             Some(Ok(TungsteniteMessage::Ping(data))) => {
@@ -197,10 +211,16 @@ impl Client {
         exchange_message: String,
     ) -> Result<(), ServerHandlerError> {
         match serde_json::from_str(&exchange_message) {
-            Ok(ExchangeMessage::Update(Event::UpdateClient(action))) => match action {
-                Action::ShowNewSubtitles(subtitles)=>todo!(),
-                Action::ChangeColour(colour_rgb)=>todo!(),
-                Action::PlayAudio(audio_file)=>Ok(self.audio_player.send(InternalEventMessageClient::PlayAudio(audio_file,self.sender.clone())).await?),
+            Ok(ExchangeMessage::Scene(Event::PerformAction(action))) => match action {
+                Action::ShowNewSubtitles(subtitles) => todo!(),
+                Action::ChangeColour(colour_rgb) => todo!(),
+                Action::PlayAudio(audio_file) => Ok(self
+                    .audio_player
+                    .send(InternalEventMessageClient::PlayAudio(
+                        audio_file,
+                        self.sender.clone(),
+                    ))
+                    .await?),
             },
             Ok(ExchangeMessage::Request(_)) => {
                 warn!(?exchange_message, "Requested Action by Server is not supported. Server may be sending Client Actions?");

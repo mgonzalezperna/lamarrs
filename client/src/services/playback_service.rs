@@ -35,7 +35,11 @@ pub struct PlaybackService {
 impl PlaybackService {
     pub fn new(media_path: PathBuf) -> Self {
         let (sender, receiver) = channel(32);
-        Self { sender, receiver, media_path }
+        Self {
+            sender,
+            receiver,
+            media_path,
+        }
     }
 }
 
@@ -95,7 +99,10 @@ impl PlaybackService {
         sender: Sender<InternalEventMessageClient>,
     ) -> Result<(), PlaybackServiceError> {
         info!("Playing audio file {:?}.", audio_file_data);
-        let audio_file_path = Path::join(&self.media_path, audio_file_data.file_name_with_extension().to_string());
+        let audio_file_path = Path::join(
+            &self.media_path,
+            audio_file_data.file_name_with_extension().to_string(),
+        );
         let stream_handle = rodio::OutputStreamBuilder::open_default_stream()?;
         let sink = rodio::Sink::connect_new(stream_handle.mixer());
 

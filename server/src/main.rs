@@ -1,16 +1,20 @@
 use std::env;
 use std::io;
+use std::path::PathBuf;
 mod client_factory;
 mod client_handler;
 mod mqtt;
+mod sequencer;
 mod services;
 //mod test; Tests are all broken, will fix them as soon as possible.
 
 use crate::client_factory::ClientBuilder;
+use crate::sequencer::Sequencer;
 use crate::services::service::ColourService;
 use crate::services::service::PlaybackService;
 use crate::services::service::SubtitleService;
 use crate::services::LamarrsService;
+use clap::Parser;
 use color_eyre::eyre::eyre;
 use color_eyre::Result;
 use mqtt::MqttInterface;
@@ -18,6 +22,7 @@ use tokio::net::TcpListener;
 use tracing::instrument;
 use tracing::{debug, error, info};
 use tracing_subscriber::filter::{EnvFilter, ParseError};
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -31,22 +36,30 @@ pub enum LamarrsServerError {
     FromUtf8(#[from] std::string::FromUtf8Error),
 }
 
+// Configure a subscriber that output logs to stdout.
 fn configure_logging(level: &str) -> Result<(), ParseError> {
-    let env_filter = EnvFilter::try_new(level)?.add_directive(
-        "rumqttc=info"
-            .parse()
-            .expect("Failed to set log level of rumqttc to info"),
-    );
-
-    let format = tracing_subscriber::fmt::format()
-        .with_source_location(true)
-        .with_target(false);
-
-    tracing_subscriber::fmt()
-        .event_format(format)
-        .with_env_filter(env_filter)
+    tracing_subscriber::registry()
+        .with(fmt::layer())
+        .with(EnvFilter::try_new(level)?)
         .init();
     Ok(())
+}
+
+#[derive(Parser, Debug)]
+pub struct Args {
+    /// The verbosity of the application, options are TRACE, DEBUG, INFO, WARN and ERROR.
+    #[arg(long, default_value = "INFO")]
+    pub log_level: String,
+    /// Server hostname or IP
+    #[arg(short, long)]
+    pub server_ip: String,
+    /// Port number
+    #[arg(short, long, default_value_t = 8080)]
+    pub port: u16,
+    /// Relative Path to the executable where to look for the sequencer yaml
+    /// file with the show list of instructions.
+    #[arg(long)]
+    pub sequence_path: PathBuf,
 }
 
 #[tokio::main]
@@ -57,14 +70,12 @@ async fn main() -> Result<()> {
     color_eyre::install()?;
     info! {VERSION};
 
-    let server_ip_addr = env::args().nth(1).ok_or(LamarrsServerError::ServerConfig {
-        err_desc: "The address:port to serve Lamarrs was not provided".into(),
-    })?;
-    configure_logging("debug").map_err(|e| LamarrsServerError::ServerConfig {
-        err_desc: e.to_string(),
-    })?;
+    // Parsing of CLI arguments.
+    let args = Args::parse();
+    configure_logging(&args.log_level).expect("Failed to configure logging to stdout.");
 
     // Creates the event loop and TCP listener we'll accept connections on.
+    let server_ip_addr = format!("{}:{}", args.server_ip, args.port);
     let try_socket = TcpListener::bind(&server_ip_addr).await;
     let listener = try_socket?;
     info!("Listening on: {}", server_ip_addr);
@@ -84,11 +95,20 @@ async fn main() -> Result<()> {
         colour_service.sender.clone(),
         playback_service.sender.clone(),
     );
+    debug!("Creating Sequencer Service");
+    let mut sequencer = Sequencer::new(
+        subtitle_service.sender.clone(),
+        colour_service.sender.clone(),
+        playback_service.sender.clone(),
+        args.sequence_path,
+    );
+
     debug!("Creating Client builder");
     let client_builder = ClientBuilder::new(
         subtitle_service.sender.clone(),
         colour_service.sender.clone(),
         playback_service.sender.clone(),
+        sequencer.sender.clone(),
     );
 
     tokio::select! {
@@ -103,6 +123,9 @@ async fn main() -> Result<()> {
         }
         result = mqtt_interface.run() => {
             Err(eyre!("MQTT service crashed: {:?}", result))?
+        }
+        result = sequencer.run() => {
+            Err(eyre!("Sequencer crashed: {:?}", result))?
         }
         result = client_builder.run(listener) => {
             Err(eyre!("Client builder service crashed: {:?}", result))?

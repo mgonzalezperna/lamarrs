@@ -2,7 +2,11 @@
 #![no_main]
 #![allow(async_fn_in_trait)]
 
-use core::fmt::Write;
+mod async_gpio_input_handler;
+mod oled_handler;
+mod server_handler;
+mod websocket_handler;
+
 use core::str::FromStr;
 use cyw43::JoinOptions;
 use cyw43_pio::{PioSpi, DEFAULT_CLOCK_DIVIDER};
@@ -10,36 +14,17 @@ use embassy_executor::Spawner;
 use embassy_net::{Config, IpAddress, IpEndpoint, Ipv4Address, StackResources};
 use embassy_rp::bind_interrupts;
 use embassy_rp::clocks::RoscRng;
-use embassy_rp::gpio::{Level, Output};
-use embassy_rp::i2c::{
-    self, Async, Config as Config_i2c, I2c, InterruptHandler as InterruptHandler_i2c,
-};
+use embassy_rp::gpio::{Input, Level, Output, Pull};
+use embassy_rp::i2c::{self, Config as Config_i2c, InterruptHandler as InterruptHandler_i2c};
 use embassy_rp::peripherals::{DMA_CH0, I2C1, PIO0};
 use embassy_rp::pio::{InterruptHandler, Pio};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel;
 
-use embedded_graphics::primitives::{PrimitiveStyleBuilder, Rectangle};
-use embedded_graphics::{
-    mono_font::{ascii::FONT_6X10, MonoTextStyleBuilder},
-    pixelcolor::BinaryColor,
-    prelude::*,
-    text::{Baseline, Text},
-};
-use heapless::String;
-use lamarrs_utils::action_messages::Action;
-use lamarrs_utils::exchange_messages::ExchangeMessage;
-use lamarrs_utils::ClientIdAndLocation;
-use serde::Serialize;
-use ssd1306::mode::{BufferedGraphicsMode, DisplayConfig};
-use ssd1306::prelude::{DisplayRotation, I2CInterface};
-use ssd1306::size::DisplaySize128x64;
-use ssd1306::{I2CDisplayInterface, Ssd1306};
+use crate::async_gpio_input_handler::{async_input_handler, GpioInputEvents};
+use crate::oled_handler::{oled_ssd1306_task, OledEvents};
 use static_cell::StaticCell;
-use uuid::Builder;
 
-mod server_handler;
-mod websocket_handler;
 use {defmt_rtt as _, panic_probe as _};
 
 bind_interrupts!(struct Irqs {
@@ -50,95 +35,12 @@ bind_interrupts!(struct Irqs {
 const WIFI_NETWORK: &str = ""; // change to your network SSID
 const WIFI_PASSWORD: &str = ""; // change to your network password
 
-/// Events that worker tasks send to the OLED_CHANNEL.
-enum OledEvents {
-    ConnectedToWifi(bool),         // Connected stablished with router.
-    ConnectedToOrchestrator(bool), // Connected to Lamarrs orchestrator.
-    RegiteredWithUuid(String<20>), // Once registered, report the temporary lamarrs device UUID to the screen for easy identification.
-    WsMessage(String<100>),        // New Message received from orchestrator.
-}
-
-/// Channel for oled/screen related messages
+/// Channel for oled/screen related messages.
 static OLED_CHANNEL: channel::Channel<CriticalSectionRawMutex, OledEvents, 10> =
     channel::Channel::new();
-
-// Function that updates the SSD1306 OLED display.
-fn update_line(
-    display: &mut Ssd1306<
-        I2CInterface<I2c<'_, I2C1, Async>>,
-        DisplaySize128x64,
-        BufferedGraphicsMode<DisplaySize128x64>,
-    >,
-    y: i32,
-    text: &str,
-    font_height: u32,
-) {
-    let rect = Rectangle::new(Point::new(0, y), Size::new(128, font_height));
-    let clear = PrimitiveStyleBuilder::new()
-        .fill_color(BinaryColor::Off)
-        .build();
-    rect.into_styled(clear).draw(display).unwrap();
-
-    display.flush().unwrap();
-    let text_style = MonoTextStyleBuilder::new()
-        .font(&FONT_6X10)
-        .text_color(BinaryColor::On)
-        .build();
-    Text::with_baseline(text, Point::new(0, y), text_style, Baseline::Top)
-        .draw(display)
-        .unwrap();
-    display.flush().unwrap();
-}
-
-// Worker that handles the SSD1306 OLED display.
-#[embassy_executor::task]
-async fn oled_ssd1306_task(i2c1: I2c<'static, I2C1, Async>) {
-    defmt::info!("Oled screen initialising");
-    let inbound = OLED_CHANNEL.receiver();
-
-    let interface = I2CDisplayInterface::new(i2c1);
-    let mut display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
-        .into_buffered_graphics_mode();
-
-    display.init().unwrap();
-
-    loop {
-        // Do nothing until we receive any event
-        let event = inbound.receive().await;
-        match event {
-            OledEvents::ConnectedToWifi(bool) => {
-                let status = match bool {
-                    true => "on",
-                    false => "off",
-                };
-                let mut message: String<50> = String::new();
-                write!(&mut message, "WiFi: {}", status).unwrap();
-                update_line(&mut display, 0, message.as_str(), 10);
-                defmt::debug!("Showing WiFi connection status in Oled");
-            }
-            OledEvents::ConnectedToOrchestrator(bool) => {
-                let status = match bool {
-                    true => "on",
-                    false => "off",
-                };
-                let mut message: String<50> = String::new();
-                write!(&mut message, "Lamarrs: {}", status).unwrap();
-                update_line(&mut display, 16, message.as_str(), 10);
-                defmt::debug!("Showing orchestrator connection status in Oled");
-            }
-            OledEvents::RegiteredWithUuid(uuid) => {
-                let mut message: String<50> = String::new();
-                write!(&mut message, "ID: {}", uuid).unwrap();
-                update_line(&mut display, 32, message.as_str(), 10);
-                defmt::debug!("Showing UUID in Oled");
-            }
-            OledEvents::WsMessage(payload) => {
-                update_line(&mut display, 48, payload.as_str(), 10);
-                defmt::debug!("Showing lamarrs payload in Oled");
-            }
-        }
-    }
-}
+/// Channel for Button triggered messages.
+static ASYNC_GPIO_INPUT_CHANNEL: channel::Channel<CriticalSectionRawMutex, GpioInputEvents, 10> =
+    channel::Channel::new();
 
 /// Create a new instance of the CYW43 driver.
 #[embassy_executor::task]
@@ -175,9 +77,8 @@ async fn main(spawner: Spawner) {
     let oled_sender = OLED_CHANNEL.sender();
     oled_sender.send(OledEvents::ConnectedToWifi(false)).await;
     oled_sender
-        .send(OledEvents::ConnectedToOrchestrator(false))
+        .send(OledEvents::ConnectedToLamarrs(false, None))
         .await;
-    oled_sender.send(OledEvents::WsMessage(String::new())).await;
 
     let fw = include_bytes!("../cyw43-firmware/43439A0.bin");
     let clm = include_bytes!("../cyw43-firmware/43439A0_clm.bin");
@@ -257,5 +158,10 @@ async fn main(spawner: Spawner) {
     let target = IpEndpoint::new(IpAddress::Ipv4(lamarrs_ip_address), 8080);
     spawner
         .spawn(server_handler::server_handler(stack, target))
+        .unwrap();
+
+    let async_input = Input::new(peripherals.PIN_13, Pull::Down);
+    spawner
+        .spawn(async_input_handler(async_input, control))
         .unwrap();
 }

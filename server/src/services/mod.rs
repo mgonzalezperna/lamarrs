@@ -1,16 +1,19 @@
 pub mod service;
 
 use lamarrs_utils::{
-    action_messages::{Event, Action},
+    action_messages::{Action, Event},
     exchange_messages::{AckResult, ExchangeMessage, NackResult},
     ClientIdAndLocation, RelativeLocation,
 };
 use tokio::sync::mpsc::{self, Sender};
-use tracing::info;
+use tracing::{error, info, instrument};
 use uuid::Uuid;
 
 use std::{
-    collections::{hash_map, HashMap},
+    collections::{
+        hash_map::{self, Entry},
+        HashMap,
+    },
     fmt::Display,
 };
 
@@ -22,13 +25,18 @@ pub enum LamarrsServiceError {
     SendExchangeMessage(
         #[from] mpsc::error::SendError<lamarrs_utils::exchange_messages::ExchangeMessage>,
     ),
+    #[error("Error sending an InternalEventMessageServer")]
+    SendInternalEventMessage(#[from] mpsc::error::SendError<InternalEventMessageServer>),
     #[error("The message type {} requested to send to the Target Clients is not allowed for the service {}.", action_message, service)]
     NotAllowedMessageType {
         action_message: String,
         service: String,
     },
+    #[error("Client was not found in the list of {} subscribers.", service)]
+    ClientNotFound { service: String },
+    #[error("Client is already subscribed to {}.", service)]
+    ClientAlreadySubscribed { service: String },
 }
-
 
 /// This is a distorted re-export of the ActionMessage from utils.
 /// Moving this to the lamarrs-utils doesn't make sense right now because
@@ -40,9 +48,9 @@ pub enum LamarrsServiceError {
 #[derive(Debug)]
 pub enum InternalEventMessageServer {
     AddTargetClient(ClientIdAndLocation, Sender<ExchangeMessage>),
-    RemoveTargetClient(ClientIdAndLocation, Sender<ExchangeMessage>),
-    UpdateLocation(ClientIdAndLocation, Sender<ExchangeMessage>),
-    UpdateClients(Action, Option<RelativeLocation>),
+    RemoveTargetClient(ClientIdAndLocation),
+    UpdateClientData(ClientIdAndLocation, Sender<ExchangeMessage>),
+    PerformAction(Action, Option<RelativeLocation>),
 }
 
 #[derive(Debug)]
@@ -57,29 +65,29 @@ pub trait LamarrsService: Display {
     async fn receive_message(&mut self) -> Option<InternalEventMessageServer>;
 
     /// Runs the Service.
+    #[instrument(name = "service::run", skip(self), fields(service=self.to_string()), level = "INFO", ret, err)]
     async fn run(&mut self) -> Result<(), LamarrsServiceError> {
         loop {
             while let Some(message) = self.receive_message().await {
-                match message {
+                let results = match message {
                     InternalEventMessageServer::AddTargetClient(
                         client_id_and_location,
                         client_sender,
-                    )
-                    | InternalEventMessageServer::UpdateLocation(
+                    ) => {
+                        self.insert_target_client(client_id_and_location, client_sender)
+                            .await
+                    }
+                    InternalEventMessageServer::UpdateClientData(
                         client_id_and_location,
                         client_sender,
                     ) => {
-                        self.upsert_target_client(client_id_and_location, client_sender)
-                            .await?
+                        self.update_target_client(client_id_and_location, client_sender)
+                            .await
                     }
-                    InternalEventMessageServer::RemoveTargetClient(
-                        client_id_and_location,
-                        client_sender,
-                    ) => {
-                        self.remove_target_client(client_id_and_location, client_sender)
-                            .await?
+                    InternalEventMessageServer::RemoveTargetClient(client_id_and_location) => {
+                        self.remove_target_client(client_id_and_location).await
                     }
-                    InternalEventMessageServer::UpdateClients(
+                    InternalEventMessageServer::PerformAction(
                         message_for_subscribed_clients,
                         relative_location,
                     ) => {
@@ -87,21 +95,55 @@ pub trait LamarrsService: Display {
                             message_for_subscribed_clients,
                             relative_location,
                         )
-                        .await?
+                        .await
                     }
                     _ => {
                         return Err(LamarrsServiceError::Service {
                             service: self.to_string(),
                         })
                     }
-                }
+                };
+                if let Err(service_error) = results {
+                    error!("{:?}", service_error)
+                };
             }
         }
     }
 
-    /// Inserts or updates a Client into the current Service target list.
+    /// Updates a Client into the current Service target list if already exists.
     /// Services hold their TargetClients in a HashMap using the Client UUID as Key.
-    async fn upsert_target_client(
+    async fn update_target_client(
+        &mut self,
+        client_id_and_location: ClientIdAndLocation,
+        new_client_sender: Sender<ExchangeMessage>,
+    ) -> Result<(), LamarrsServiceError> {
+        info!(
+            ?client_id_and_location,
+            "Processing adding Client to Service {}",
+            self.to_string()
+        );
+
+        let target_map = self.get_target_client_map();
+
+        if let Entry::Occupied(mut client_entry) = target_map.entry(client_id_and_location.uuid) {
+            info!(?client_id_and_location.uuid, "Found entry for");
+            let client: &mut TargetClient = client_entry.get_mut();
+            client.sender = new_client_sender;
+            // If already subscribed, it uses the saved sender to notify the Client.
+            Ok(client
+                .sender
+                .send(ExchangeMessage::Ack(AckResult::UpdatedSubscription))
+                .await?)
+        } else {
+            Err(LamarrsServiceError::ClientNotFound {
+                service: self.to_string(),
+            })
+        }
+    }
+
+    /// Inserts a Client into the current Service target list.
+    /// Services hold their TargetClients in a HashMap using the Client UUID as Key.
+    async fn insert_target_client(
         &mut self,
         client_id_and_location: ClientIdAndLocation,
         client_sender: Sender<ExchangeMessage>,
@@ -114,28 +156,32 @@ pub trait LamarrsService: Display {
 
         let target_map = self.get_target_client_map();
 
-        match target_map.entry(client_id_and_location.id) {
+        match target_map.entry(client_id_and_location.uuid) {
             hash_map::Entry::Occupied(mut client_entry) => {
-                info!(?client_id_and_location.id, "Found entry for");
+                info!(?client_id_and_location.uuid, "Found entry for");
                 let client: &mut TargetClient = client_entry.get_mut();
                 // If already subscribed, it uses the saved sender to notify the Client.
-                Ok(client
+                client
                     .sender
                     .send(ExchangeMessage::Nack(NackResult::AlreadySubscribed))
-                    .await?)
+                    .await?;
+                Err(LamarrsServiceError::ClientAlreadySubscribed {
+                    service: self.to_string(),
+                })
             }
             hash_map::Entry::Vacant(_) => {
                 // This function inserts if it doesn't exist and updates if it does. Perfect for upserting.
                 target_map.insert(
-                    client_id_and_location.id,
+                    client_id_and_location.uuid,
                     TargetClient {
                         sender: client_sender.clone(),
                         location: client_id_and_location.location,
                     },
                 );
-                Ok(client_sender
+                client_sender
                     .send(ExchangeMessage::Ack(AckResult::Success))
-                    .await?) // If subscribed successfully, it uses the received sender to notify the Client.
+                    .await?; // If subscribed successfully, it uses the received sender to notify the Client.
+                Ok(())
             }
         }
     }
@@ -144,7 +190,6 @@ pub trait LamarrsService: Display {
     async fn remove_target_client(
         &mut self,
         client_id_and_location: ClientIdAndLocation,
-        client_sender: Sender<ExchangeMessage>,
     ) -> Result<(), LamarrsServiceError> {
         info!(
             ?client_id_and_location,
@@ -154,20 +199,15 @@ pub trait LamarrsService: Display {
 
         let target_map = self.get_target_client_map();
 
-        match target_map.entry(client_id_and_location.id) {
+        match target_map.entry(client_id_and_location.uuid) {
             hash_map::Entry::Occupied(client_entry) => {
-                info!(?client_id_and_location.id, "Found entry for");
+                info!(?client_id_and_location.uuid, "Found entry for");
                 client_entry.remove_entry();
-                // If already subscribed, it uses the saved sender to notify the Client.
-                Ok(client_sender
-                    .send(ExchangeMessage::Ack(AckResult::Success))
-                    .await?)
+                Ok(())
             }
-            hash_map::Entry::Vacant(_) => {
-                Ok(client_sender
-                    .send(ExchangeMessage::Nack(NackResult::Failed))
-                    .await?) // If it wasn't subscribed, returns Failed.
-            }
+            hash_map::Entry::Vacant(_) => Err(LamarrsServiceError::ClientNotFound {
+                service: self.to_string(),
+            }),
         }
     }
 
@@ -208,7 +248,7 @@ pub trait LamarrsService: Display {
             .collect::<Vec<_>>();
         for sender in target_senders_filtered_by_location {
             sender
-                .send(ExchangeMessage::Update(Event::UpdateClient(
+                .send(ExchangeMessage::Scene(Event::PerformAction(
                     message_for_subscribed_clients.clone(),
                 )))
                 .await?
