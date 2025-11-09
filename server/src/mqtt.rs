@@ -22,7 +22,7 @@ impl MqttInterface {
         colour: Sender<InternalEventMessageServer>,
         playback_audio: Sender<InternalEventMessageServer>,
     ) -> Self {
-        let host = "192.168.178.70";
+        let host = "";
         let port: u16 = 1883;
 
         let mut mqttoptions = MqttOptions::new("lamarrs-server", host, port);
@@ -76,7 +76,7 @@ impl MqttInterface {
                             match &service_action {
                                 lamarrs_utils::action_messages::Action::ShowNewSubtitles(_) => {
                                     self.subtitles
-                                        .send(InternalEventMessageServer::OrchestrateClients(
+                                        .send(InternalEventMessageServer::PerformAction(
                                             service_action,
                                             relative_location,
                                         ))
@@ -84,7 +84,7 @@ impl MqttInterface {
                                 }
                                 lamarrs_utils::action_messages::Action::ChangeColour(_) => {
                                     self.colour
-                                        .send(InternalEventMessageServer::OrchestrateClients(
+                                        .send(InternalEventMessageServer::PerformAction(
                                             service_action,
                                             relative_location,
                                         ))
@@ -92,7 +92,7 @@ impl MqttInterface {
                                 }
                                 lamarrs_utils::action_messages::Action::PlayAudio(_) => {
                                     self.playback_audio
-                                        .send(InternalEventMessageServer::OrchestrateClients(
+                                        .send(InternalEventMessageServer::PerformAction(
                                             service_action,
                                             relative_location,
                                         ))

@@ -25,6 +25,8 @@ pub enum LamarrsServiceError {
     SendExchangeMessage(
         #[from] mpsc::error::SendError<lamarrs_utils::exchange_messages::ExchangeMessage>,
     ),
+    #[error("Error sending an InternalEventMessageServer")]
+    SendInternalEventMessage(#[from] mpsc::error::SendError<InternalEventMessageServer>),
     #[error("The message type {} requested to send to the Target Clients is not allowed for the service {}.", action_message, service)]
     NotAllowedMessageType {
         action_message: String,
@@ -48,7 +50,7 @@ pub enum InternalEventMessageServer {
     AddTargetClient(ClientIdAndLocation, Sender<ExchangeMessage>),
     RemoveTargetClient(ClientIdAndLocation),
     UpdateClientData(ClientIdAndLocation, Sender<ExchangeMessage>),
-    OrchestrateClients(Action, Option<RelativeLocation>),
+    PerformAction(Action, Option<RelativeLocation>),
 }
 
 #[derive(Debug)]
@@ -85,7 +87,7 @@ pub trait LamarrsService: Display {
                     InternalEventMessageServer::RemoveTargetClient(client_id_and_location) => {
                         self.remove_target_client(client_id_and_location).await
                     }
-                    InternalEventMessageServer::OrchestrateClients(
+                    InternalEventMessageServer::PerformAction(
                         message_for_subscribed_clients,
                         relative_location,
                     ) => {
