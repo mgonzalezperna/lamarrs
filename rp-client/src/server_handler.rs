@@ -96,7 +96,7 @@ pub async fn server_handler(stack: embassy_net::Stack<'static>, target: IpEndpoi
                                     oled_sender
                                         .send(OledEvents::WsMessage(message.clone()))
                                         .await;
-                                    
+
                                     // This buffer will be used by certain structs to show themselves as &str.
                                     // By now only Action implement the `as_str` function, but later we will
                                     // implement them for all as a Trait.
@@ -127,7 +127,9 @@ pub async fn server_handler(stack: embassy_net::Stack<'static>, target: IpEndpoi
                                     );
                                     // Fatal: break to reconnect or close clearly. This avoids getting trapped in an infinite logging loop.
                                     if let WsError::InvalidResponse = e {
-                                        oled_sender.send(OledEvents::ConnectedToLamarrs(false, None)).await;
+                                        oled_sender
+                                            .send(OledEvents::ConnectedToLamarrs(false, None))
+                                            .await;
                                         break;
                                     }
                                 }
