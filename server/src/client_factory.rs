@@ -1,6 +1,7 @@
 use crate::client_handler::Client;
 use crate::services::InternalEventMessageServer;
 use color_eyre::eyre::eyre;
+use lamarrs_utils::exchange_messages::ExchangeMessage;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::Sender;
 use tracing::info;
@@ -11,6 +12,7 @@ pub struct ClientBuilder {
     subtitle: Sender<InternalEventMessageServer>,
     color: Sender<InternalEventMessageServer>,
     playback: Sender<InternalEventMessageServer>,
+    sequencer: Sender<ExchangeMessage>,
 }
 
 impl ClientBuilder {
@@ -19,11 +21,13 @@ impl ClientBuilder {
         subtitle: Sender<InternalEventMessageServer>,
         color: Sender<InternalEventMessageServer>,
         playback: Sender<InternalEventMessageServer>,
+        sequencer: Sender<ExchangeMessage>,
     ) -> Self {
         Self {
             subtitle,
             color,
             playback,
+            sequencer,
         }
     }
 
@@ -43,6 +47,7 @@ impl ClientBuilder {
                             self.subtitle.clone(),
                             self.color.clone(),
                             self.playback.clone(),
+                            self.sequencer.clone(),
                         );
                         async move {
                             info!("Starting new Client handler: {}", socket_addr);
