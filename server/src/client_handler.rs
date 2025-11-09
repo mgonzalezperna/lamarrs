@@ -43,6 +43,10 @@ pub enum ClientHandlerError {
     SendActionMessageWithSender(
         #[from] mpsc::error::SendError<services::InternalEventMessageServer>,
     ),
+    #[error("Error sending an ExchangeMessage")]
+    SendExchangeMessage(
+        #[from] mpsc::error::SendError<lamarrs_utils::exchange_messages::ExchangeMessage>,
+    ),
 }
 
 enum ClientWire {
@@ -56,6 +60,7 @@ pub struct Client {
     subtitles_service: Sender<InternalEventMessageServer>,
     colour_service: Sender<InternalEventMessageServer>,
     playback_service: Sender<InternalEventMessageServer>,
+    sequencer: Sender<ExchangeMessage>,
 
     sender: Sender<ExchangeMessage>,
     inbox: Receiver<ExchangeMessage>,
@@ -69,6 +74,7 @@ impl Client {
         subtitles_service: Sender<InternalEventMessageServer>,
         colour_service: Sender<InternalEventMessageServer>,
         playback_service: Sender<InternalEventMessageServer>,
+        sequencer: Sender<ExchangeMessage>,
     ) -> Self {
         let (sender, inbox) = channel(32);
         let subscriber_id = None;
@@ -77,6 +83,7 @@ impl Client {
             subtitles_service,
             colour_service,
             playback_service,
+            sequencer,
             sender,
             inbox,
             clock: MockableClock::Real,
@@ -99,7 +106,7 @@ impl Client {
     pub async fn run(&mut self, stream: TcpStream) -> Result<(), ClientHandlerError> {
         // Creates the Sink and Stream.
         let (mut remote_sender, mut remote_inbox) = self.accept_and_connect(stream).await?;
-        let connection_watchdog_timer = Duration::from_secs(5);
+        let connection_watchdog_timer = Duration::from_hours(5);
 
         loop {
             tokio::select! {
@@ -196,7 +203,7 @@ impl Client {
             // Process inbound messages from devices that send json using serde_json.
             Some(Ok(TungsteniteMessage::Text(string_payload))) => {
                 debug!(?string_payload, "Inbound Text Payload");
-                let payload_as_str_result = serde_json::from_str(&string_payload.to_string());
+                let payload_as_str_result = serde_json::from_str(string_payload.as_ref());
                 let payload = match payload_as_str_result {
                     Ok(payload) => payload,
                     Err(error) => {
@@ -208,7 +215,7 @@ impl Client {
                             heapless::String::try_from("Unrecognized message: Malformed payload.");
                         match error_descr {
                             Ok(error_descr) => {
-                                self.sender.send(ExchangeMessage::Error(ErrorDescription{error_descr})).await;
+                                self.sender.send(ExchangeMessage::Error(ErrorDescription{error_descr})).await?;
                             }
                             Err(_) => error!("Client can't be notified of the error, there was an issue parsing the error message.")
                         }
@@ -217,7 +224,7 @@ impl Client {
                         ));
                     }
                 };
-                if let None = self.id {
+                if self.id.is_none() {
                     // From now on, we are only going to talk Text with this client.
                     self.wire = ClientWire::Text;
                     // We must get the client a identifier -and lamarrs version in the future-
@@ -236,7 +243,7 @@ impl Client {
                     postcard::from_bytes::<ExchangeMessage>(&bytes_payload).map_err(|e| {
                         ClientHandlerError::FailureDecodingBinaryExchangeMessage(e.to_string())
                     })?;
-                if let None = self.id {
+                if self.id.is_none() {
                     // From now on, we are only going to talk Binary with this client.
                     self.wire = ClientWire::Binary;
                     // We must get the client a identifier -and lamarrs version in the future-
@@ -307,7 +314,7 @@ impl Client {
                 // Confirm success to client
                 self.sender
                     .send(ExchangeMessage::Ack(AckResult::Success))
-                    .await;
+                    .await?;
                 Ok(())
             }
             ExchangeMessage::HeartbeatAck => {
@@ -323,7 +330,7 @@ impl Client {
                 );
                 self.sender
                     .send(ExchangeMessage::Nack(NackResult::NotSubscribed))
-                    .await;
+                    .await?;
                 Err(ClientHandlerError::UnregisteredSubscriber(
                     exchange_message.to_string(),
                 ))
@@ -355,7 +362,7 @@ impl Client {
                     warn!(?action, "Requested Event by Client {:?} is not supported. Client may be sending Server Event?", self.id);
                     self.sender
                         .send(ExchangeMessage::Nack(NackResult::Failed))
-                        .await;
+                        .await?;
                     Err(ClientHandlerError::InvalidExchangeMessage(
                         action.to_string(),
                     ))
@@ -367,6 +374,14 @@ impl Client {
                 info!("Watchdog reset: {}", self.watchdog_sent);
                 Ok(())
             }
+            ExchangeMessage::NextScene => {
+                info!("Requesting moving to the next scene to the Orchestrator");
+                Ok(self.sequencer.send(exchange_message).await?)
+            }
+            ExchangeMessage::RetriggerScene => {
+                info!("Requesting retrigger to the current scene to the Orchestrator");
+                Ok(self.sequencer.send(exchange_message).await?)
+            }
             _ => {
                 warn!(
                     ?exchange_message,
@@ -374,7 +389,7 @@ impl Client {
                 );
                 self.sender
                     .send(ExchangeMessage::Nack(NackResult::Failed))
-                    .await;
+                    .await?;
                 Err(ClientHandlerError::InvalidExchangeMessage(
                     exchange_message.to_string(),
                 ))
