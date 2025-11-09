@@ -1,0 +1,25 @@
+version: 1
+sequence:
+  - name: "Action_1"
+    action: 
+      !PlayAudio
+        file_name: "ASDF"
+        file_extension: "mp3"
+    location: null
+    duration: null
+
+  - name: "Action_2"
+    action: 
+      !ChangeColour
+        r: 123
+        g: 111
+        b: 69
+    location: null
+    duration: 500ms
+
+  - name: "Action_3"
+    action:
+      !ShowNewSubtitles
+        subtitles: "turbulent sea instrumental"
+    location: null
+    duration: 1s
