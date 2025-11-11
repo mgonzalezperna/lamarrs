@@ -1,16 +1,13 @@
 use std::{
-    str::FromStr,
-    thread,
-    time::{self, Duration},
+    num::NonZeroU16, str::FromStr, thread::{self, sleep}, time::{self, Duration}
 };
 
 use inquire::{CustomType, InquireError, Select};
 use lamarrs_utils::{
-    action_messages::{Action, Event},
-    orchestration_messages::OrchestrationMessage,
-    AudioFile, ColourRgb, RelativeLocation, Service, Subtitles,
+    AudioFile, ColourRgb, MidiInstruction, RelativeLocation, Service, Subtitles, action_messages::{Action, Event}, orchestration_messages::OrchestrationMessage
 };
 use lipsum::lipsum_words_with_rng;
+use midir::{MidiOutput, MidiOutputConnection, os::unix::VirtualOutput};
 use rand::seq::{IndexedRandom, SliceRandom};
 use rumqttc::{mqttbytes::QoS, Client, Connection, EventLoop, MqttOptions};
 use strum::{EnumIter, IntoEnumIterator};
@@ -102,6 +99,7 @@ fn main() {
         Ok(Service::Subtitle) => on_subtitle(target_location),
         Ok(Service::Colour) => on_color(target_location),
         Ok(Service::AudioPlayer) => on_play_audio(target_location),
+        Ok(Service::Midi) => on_midi(target_location),
         Err(_) => panic!("There was an error, please try again"),
     };
     send_to_mqtt(mqtt_sender, orchestrator_message);
@@ -164,6 +162,43 @@ fn on_play_audio(target_location: Option<RelativeLocation>) -> OrchestrationMess
             file_name,
             file_extension,
         })),
+        target_location,
+    )
+}
+
+#[instrument(name = "Orchestrator::on_subtitle", level = "INFO", ret)]
+fn on_midi(target_location: Option<RelativeLocation>) -> OrchestrationMessage {
+    // // Create a virtual MIDI output
+    // let midi_out = MidiOutput::new("Pi MIDI Out").unwrap();
+    // // If you want to open a hardware port:
+    // let mut out_ports = midi_out.ports();
+    // let ids= out_ports.iter().enumerate().map(|(index, port)| index).collect();
+    // let port = Select::new("Select MIDI port", ids)
+    //     .prompt()
+    //     .unwrap();
+    // let mut conn_out: MidiOutputConnection = {
+    //     let port = &out_ports[port];
+    //     info!("Opening existing port: {}", midi_out.port_name(&port).unwrap());
+    //     midi_out.connect(&port, "midir-test").unwrap()
+    // };
+
+    // // Send a simple Note On / Note Off
+    // let preset_26 = [0xC0, 26];  // channel 1, middle C, velocity 100
+    // let preset_27= [0xC0, 27]; // channel 1, middle C, velocity 100
+
+    // conn_out.send(&preset_26).unwrap();
+    // thread::sleep(Duration::from_secs(2));
+    // conn_out.send(&preset_27).unwrap();
+
+    // println!("Sent MIDI note!");
+    let midi_preset = CustomType::<NonZeroU16>::new("MIDI preset:")
+    .with_error_message("MIDI preset must be an u16.")
+    .with_help_message("")
+    .prompt()
+    .unwrap();
+
+    OrchestrationMessage::Request(
+        Event::PerformAction(Action::Midi(MidiInstruction { new_preset: midi_preset })),
         target_location,
     )
 }

@@ -11,6 +11,7 @@ mod services;
 use crate::client_factory::ClientBuilder;
 use crate::sequencer::Sequencer;
 use crate::services::service::ColourService;
+use crate::services::service::MidiService;
 use crate::services::service::PlaybackService;
 use crate::services::service::SubtitleService;
 use crate::services::LamarrsService;
@@ -89,17 +90,21 @@ async fn main() -> Result<()> {
     let mut colour_service = ColourService::new();
     debug!("Creating PlaybackService");
     let mut playback_service = PlaybackService::new();
+    debug!("Creating MidiService");
+    let mut midi_service= MidiService::new();
     debug!("Creating MQTT Interface");
     let mut mqtt_interface = MqttInterface::new(
         subtitle_service.sender.clone(),
         colour_service.sender.clone(),
         playback_service.sender.clone(),
+        midi_service.sender.clone(),
     );
     debug!("Creating Sequencer Service");
     let mut sequencer = Sequencer::new(
         subtitle_service.sender.clone(),
         colour_service.sender.clone(),
         playback_service.sender.clone(),
+        midi_service.sender.clone(),
         args.sequence_path,
     );
 
@@ -108,6 +113,7 @@ async fn main() -> Result<()> {
         subtitle_service.sender.clone(),
         colour_service.sender.clone(),
         playback_service.sender.clone(),
+        midi_service.sender.clone(),
         sequencer.sender.clone(),
     );
 
@@ -120,6 +126,9 @@ async fn main() -> Result<()> {
         }
         result = playback_service.run() => {
             Err(eyre!("Playback service crashed: {:?}", result))?
+        }
+        result = midi_service.run() => {
+            Err(eyre!("MQTT service crashed: {:?}", result))?
         }
         result = mqtt_interface.run() => {
             Err(eyre!("MQTT service crashed: {:?}", result))?

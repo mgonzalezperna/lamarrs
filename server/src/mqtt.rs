@@ -10,6 +10,7 @@ pub struct MqttInterface {
     subtitles: Sender<InternalEventMessageServer>,
     colour: Sender<InternalEventMessageServer>,
     playback_audio: Sender<InternalEventMessageServer>,
+    midi: Sender<InternalEventMessageServer>,
 
     mqtt_sender: AsyncClient,
     mqtt_receiver: EventLoop,
@@ -21,8 +22,9 @@ impl MqttInterface {
         subtitles: Sender<InternalEventMessageServer>,
         colour: Sender<InternalEventMessageServer>,
         playback_audio: Sender<InternalEventMessageServer>,
+        midi: Sender<InternalEventMessageServer>,
     ) -> Self {
-        let host = "";
+        let host = "192.168.178.70";
         let port: u16 = 1883;
 
         let mut mqttoptions = MqttOptions::new("lamarrs-server", host, port);
@@ -33,6 +35,7 @@ impl MqttInterface {
             subtitles,
             colour,
             playback_audio,
+            midi,
             mqtt_sender,
             mqtt_receiver,
         }
@@ -92,6 +95,14 @@ impl MqttInterface {
                                 }
                                 lamarrs_utils::action_messages::Action::PlayAudio(_) => {
                                     self.playback_audio
+                                        .send(InternalEventMessageServer::PerformAction(
+                                            service_action,
+                                            relative_location,
+                                        ))
+                                        .await;
+                                }
+                                lamarrs_utils::action_messages::Action::Midi(_) => {
+                                    self.midi
                                         .send(InternalEventMessageServer::PerformAction(
                                             service_action,
                                             relative_location,

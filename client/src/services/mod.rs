@@ -1,1 +1,2 @@
-pub mod playback_service;
+pub mod playback;
+pub mod midi;
