@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use strum::Display;
 use heapless::String;
 
-use crate::{AudioFile, ClientIdAndLocation, ColourRgb, Service, Subtitles};
+use crate::{AudioFile, ClientIdAndLocation, ColourRgb, MidiInstruction, Service, Subtitles};
 
 /// These are the payloads the clients will be sending inside the Exchange Messages.
 /// In the future, they may be also the payloads between services. Some feature gating
@@ -24,7 +24,7 @@ pub enum Action {
     ShowNewSubtitles(Subtitles),
     ChangeColour(ColourRgb),
     PlayAudio(AudioFile),
-    //MIDIEvent(MidiEvent), We are dropping MIDI support by now, since this utils must be no_std friendly.
+    Midi(MidiInstruction),
 }
 
 impl Action {
@@ -43,6 +43,9 @@ impl Action {
             }
             Action::PlayAudio(audio_file) => {
                 let _ = write!(write_buffer, "Audio {:?}", audio_file.file_name);
+            },
+            Action::Midi(midi_instruction) => {
+                let _ = write!(write_buffer, "MIDI instruction {:?}", midi_instruction);
             }
         }
         write_buffer.as_str()

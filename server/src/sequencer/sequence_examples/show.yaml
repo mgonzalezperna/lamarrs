@@ -1,0 +1,53 @@
+version: 1
+sequence:
+  - name: "Action_2"
+    action: 
+      !PlayAudio
+        file_name: "Turbulent sea"
+        file_extension: "mp3"
+    location: null
+    duration: 1s
+
+  - name: "Action_3"
+    action: 
+      !Midi
+        new_preset: 21
+    location: null
+    duration: 5s
+
+  - name: "Action_4"
+    action: 
+      !Midi
+        new_preset: 59
+    location: null
+    duration: 10s
+
+  - name: "Action_5"
+    action: 
+      !Midi
+        new_preset: 1
+    location: null
+    duration: 15s
+
+  - name: "Action_6"
+    action: 
+      !Midi
+        new_preset: 59
+    location: null
+    duration: null
+
+  - name: "Action_7"
+    action: 
+      !PlayAudio
+        file_name: "turbulent sea-instrumental"
+        file_extension: "mp3"
+    location: null
+    duration: null
+
+  - name: "Action_8"
+    action: 
+      !PlayAudio
+        file_name: "Audio 09 Trude human rights"
+        file_extension: "mp3"
+    location: null
+    duration: null

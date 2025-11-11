@@ -12,6 +12,7 @@ pub struct ClientBuilder {
     subtitle: Sender<InternalEventMessageServer>,
     color: Sender<InternalEventMessageServer>,
     playback: Sender<InternalEventMessageServer>,
+    midi: Sender<InternalEventMessageServer>,
     sequencer: Sender<ExchangeMessage>,
 }
 
@@ -21,12 +22,14 @@ impl ClientBuilder {
         subtitle: Sender<InternalEventMessageServer>,
         color: Sender<InternalEventMessageServer>,
         playback: Sender<InternalEventMessageServer>,
+        midi: Sender<InternalEventMessageServer>,
         sequencer: Sender<ExchangeMessage>,
     ) -> Self {
         Self {
             subtitle,
             color,
             playback,
+            midi,
             sequencer,
         }
     }
@@ -47,6 +50,7 @@ impl ClientBuilder {
                             self.subtitle.clone(),
                             self.color.clone(),
                             self.playback.clone(),
+                            self.midi.clone(),
                             self.sequencer.clone(),
                         );
                         async move {
