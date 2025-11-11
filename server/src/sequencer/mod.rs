@@ -18,6 +18,7 @@ pub struct Sequencer {
     subtitles_service: Sender<InternalEventMessageServer>,
     colour_service: Sender<InternalEventMessageServer>,
     playback_service: Sender<InternalEventMessageServer>,
+    midi_service: Sender<InternalEventMessageServer>,
 
     pub sender: Sender<ExchangeMessage>,
     inbox: Receiver<ExchangeMessage>,
@@ -31,6 +32,7 @@ impl Sequencer {
         subtitles_service: Sender<InternalEventMessageServer>,
         colour_service: Sender<InternalEventMessageServer>,
         playback_service: Sender<InternalEventMessageServer>,
+        midi_service: Sender<InternalEventMessageServer>,
         sequence_path: PathBuf,
     ) -> Self {
         let (sender, inbox) = channel(32);
@@ -38,6 +40,7 @@ impl Sequencer {
             subtitles_service,
             colour_service,
             playback_service,
+            midi_service,
             sender,
             inbox,
             sequence_path,
@@ -62,7 +65,7 @@ impl Sequencer {
             }
         })?;
         debug!("Loaded sequence from file");
-        match serde_yaml::from_str(&yaml) {
+        match serde_yml::from_str(&yaml) {
             Ok(sequence) => {
                 debug!("Sequence results {:?}", sequence);
                 Ok(sequence)
@@ -154,7 +157,15 @@ impl Sequencer {
                         sequence_step.target_location.clone(),
                     ))
                     .await?
-            }
+            },
+            Action::Midi(_) => {
+                self.midi_service
+                    .send(InternalEventMessageServer::PerformAction(
+                        sequence_step.action.clone(),
+                        sequence_step.target_location.clone(),
+                    ))
+                    .await?
+            },
         };
         Ok(())
     }

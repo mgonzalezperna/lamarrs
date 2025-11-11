@@ -60,6 +60,7 @@ pub struct Client {
     subtitles_service: Sender<InternalEventMessageServer>,
     colour_service: Sender<InternalEventMessageServer>,
     playback_service: Sender<InternalEventMessageServer>,
+    midi_service: Sender<InternalEventMessageServer>,
     sequencer: Sender<ExchangeMessage>,
 
     sender: Sender<ExchangeMessage>,
@@ -74,6 +75,7 @@ impl Client {
         subtitles_service: Sender<InternalEventMessageServer>,
         colour_service: Sender<InternalEventMessageServer>,
         playback_service: Sender<InternalEventMessageServer>,
+        midi_service: Sender<InternalEventMessageServer>,
         sequencer: Sender<ExchangeMessage>,
     ) -> Self {
         let (sender, inbox) = channel(32);
@@ -83,6 +85,7 @@ impl Client {
             subtitles_service,
             colour_service,
             playback_service,
+            midi_service,
             sequencer,
             sender,
             inbox,
@@ -126,6 +129,7 @@ impl Client {
                                     self.subtitles_service.send(InternalEventMessageServer::RemoveTargetClient(client_id.clone())).await?;
                                     self.colour_service.send(InternalEventMessageServer::RemoveTargetClient(client_id.clone())).await?;
                                     self.playback_service.send(InternalEventMessageServer::RemoveTargetClient(client_id.clone())).await?;
+                                    self.midi_service.send(InternalEventMessageServer::RemoveTargetClient(client_id.clone())).await?;
                                 }
                                 break Err(ClientHandlerError::ConnectionLost { client_id: format!("{:?}", self.id) })
                             }
@@ -311,6 +315,12 @@ impl Client {
                         self.sender.clone(),
                     ))
                     .await?;
+                self.midi_service
+                    .send(InternalEventMessageServer::UpdateClientData(
+                        client_id_and_location.clone(),
+                        self.sender.clone(),
+                    ))
+                    .await?;
                 // Confirm success to client
                 self.sender
                     .send(ExchangeMessage::Ack(AckResult::Success))
@@ -411,6 +421,7 @@ impl Client {
             Service::Subtitle => Ok(self.subtitles_service.send(message).await?),
             Service::Colour => Ok(self.colour_service.send(message).await?),
             Service::AudioPlayer => Ok(self.playback_service.send(message).await?),
+            Service::Midi => Ok(self.midi_service.send(message).await?)
         }
     }
 
@@ -422,9 +433,10 @@ impl Client {
     ) -> Result<(), ClientHandlerError> {
         let message = InternalEventMessageServer::RemoveTargetClient(client_id_and_location);
         match service {
-            Service::Subtitle => Ok(self.subtitles_service.send(message).await?),
-            Service::Colour => Ok(self.colour_service.send(message).await?),
-            Service::AudioPlayer => Ok(self.playback_service.send(message).await?),
+            Service::Subtitle=>Ok(self.subtitles_service.send(message).await?),
+            Service::Colour=>Ok(self.colour_service.send(message).await?),
+            Service::AudioPlayer=>Ok(self.playback_service.send(message).await?),
+            Service::Midi => Ok(self.midi_service.send(message).await?)
         }
     }
 

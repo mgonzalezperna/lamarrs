@@ -60,7 +60,7 @@ pub async fn server_handler(stack: embassy_net::Stack<'static>, target: IpEndpoi
                 // Sends initial basic registration message to lamarrs server.
                 defmt::info!("Sending Register request to lamarrs server.");
                 let lamarrs_message = ExchangeMessage::Request(Event::Register(client_id.clone()));
-                send_message_to_lamarrs_server_and_process_response(
+                send_message_to_lamarrs_server(
                     &mut websocket,
                     &lamarrs_message,
                 )
@@ -75,7 +75,7 @@ pub async fn server_handler(stack: embassy_net::Stack<'static>, target: IpEndpoi
                     Service::Colour,
                     client_id.clone(),
                 ));
-                send_message_to_lamarrs_server_and_process_response(
+                send_message_to_lamarrs_server(
                     &mut websocket,
                     &lamarrs_message,
                 )
@@ -114,7 +114,7 @@ pub async fn server_handler(stack: embassy_net::Stack<'static>, target: IpEndpoi
                                         ExchangeMessage::Heartbeat => {
                                             info!("Watchdog send a heartbeat request");
                                             let heartbeat_response = ExchangeMessage::HeartbeatAck;
-                                            send_message_to_lamarrs_server_and_process_response(&mut websocket, &heartbeat_response).await;
+                                            send_message_to_lamarrs_server(&mut websocket, &heartbeat_response).await;
                                         },
                                         _ => error!("Received an invalid Exchange Message.")
                                     }
@@ -152,7 +152,7 @@ pub async fn server_handler(stack: embassy_net::Stack<'static>, target: IpEndpoi
                                     ExchangeMessage::RetriggerScene
                                 }
                             };
-                            send_message_to_lamarrs_server_and_process_response(
+                            send_message_to_lamarrs_server(
                                 &mut websocket,
                                 &lamarrs_message,
                             )
@@ -169,7 +169,7 @@ pub async fn server_handler(stack: embassy_net::Stack<'static>, target: IpEndpoi
     }
 }
 
-pub async fn send_message_to_lamarrs_server_and_process_response<'a>(
+pub async fn send_message_to_lamarrs_server<'a>(
     websocket: &mut WebSocket<'a>,
     lamarrs_message: &ExchangeMessage,
 ) {

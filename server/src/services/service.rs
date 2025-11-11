@@ -121,3 +121,43 @@ impl LamarrsService for PlaybackService {
         self.receiver.recv().await
     }
 }
+
+
+#[derive(Debug)]
+pub struct MidiService {
+    targets: HashMap<Uuid, TargetClient>,
+    pub sender: Sender<InternalEventMessageServer>,
+    receiver: Receiver<InternalEventMessageServer>,
+}
+
+impl MidiService {
+    pub fn new() -> Self {
+        let (sender, receiver) = channel(32);
+        Self {
+            targets: HashMap::new(),
+            sender,
+            receiver,
+        }
+    }
+}
+
+// Implement `Display` for `MidiService`.
+impl fmt::Display for MidiService {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", "MidiService")
+    }
+}
+
+// Implement `LamarrsService` for `MidiService`.
+impl LamarrsService for MidiService {
+    fn action_is_allowed(&self, message: &Action) -> bool {
+        matches!(message, Action::Midi(_))
+    }
+    fn get_target_client_map(&mut self) -> &mut HashMap<Uuid, TargetClient> {
+        &mut self.targets
+    }
+
+    async fn receive_message(&mut self) -> Option<InternalEventMessageServer> {
+        self.receiver.recv().await
+    }
+}

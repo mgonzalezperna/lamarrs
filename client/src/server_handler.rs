@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use async_time_mock_tokio::MockableClock;
 use futures_util::{stream::SplitSink, SinkExt, StreamExt};
 use http::Uri;
@@ -8,7 +10,7 @@ use lamarrs_utils::{
 };
 use tokio::{
     net::TcpStream,
-    sync::mpsc::{self, channel, Receiver, Sender},
+    sync::mpsc::{self, Receiver, Sender, channel}, time::sleep,
 };
 use tokio_tungstenite::{
     connect_async, tungstenite::Message as TungsteniteMessage, MaybeTlsStream,
@@ -25,6 +27,8 @@ pub enum ServerHandlerError {
     ParseError(#[from] url::ParseError),
     #[error("Connection could't not be stablished with the server.")]
     Error(#[from] tungstenite::error::Error),
+    #[error("Message could not be serialised as String.")]
+    SerializationError(#[from] serde_json::Error),
     #[error("Server connection lost")]
     ServerConnectionLost,
     #[error("Malformed payload received from Server: {0}")]
@@ -43,10 +47,10 @@ pub struct Client {
     server_address: Uri,
     sender: Sender<InternalEventMessageClient>,
     inbox: Receiver<InternalEventMessageClient>,
-    audio_player: Sender<InternalEventMessageClient>,
+    playback_service: Sender<InternalEventMessageClient>,
+    midi_service: Sender<InternalEventMessageClient>,
     //dmx: Sender<InternalEventMessageClient>,
     //led: Sender<InternalEventMessageClient>,
-    //midi: Sender<InternalEventMessageClient>,
     clock: MockableClock,
 }
 
@@ -56,9 +60,9 @@ impl Client {
         location: Option<RelativeLocation>,
         server_address: Uri,
         audio_player: Sender<InternalEventMessageClient>,
+        midi: Sender<InternalEventMessageClient>,
         // dmx: Sender<InternalEventMessageClient>,
         // led: Sender<InternalEventMessageClient>,
-        // midi: Sender<InternalEventMessageClient>,
     ) -> Self {
         let (sender, inbox) = channel(32);
         Self {
@@ -67,11 +71,11 @@ impl Client {
             server_address,
             sender,
             inbox,
-            audio_player,
+            playback_service: audio_player,
+            midi_service: midi,
             //subtitle,
             //dmx,
             //led,
-            //midi,
             clock: MockableClock::Real,
         }
     }
@@ -80,74 +84,92 @@ impl Client {
     /// This request upgrading the connection to the server then loops
     /// listening for incoming messages from the remote client or from the
     /// other Actors.
-    #[instrument(name = "Client::run", skip(self), fields(id=?self.id), level = "INFO", ret, err)]
-    pub async fn run(&mut self) -> Result<(), ServerHandlerError> {
-        let (ws_stream, _) = connect_async(&self.server_address).await?;
-        info!(
-            "WebSocket handshake with {} has been completed successfully",
-            self.server_address.to_string()
-        );
-
-        let (mut remote_sender, mut remote_inbox) = ws_stream.split();
-
-        // We add to the queue the request to Register to the Server.
-        let register_message = ExchangeMessage::Request(Event::Register(ClientIdAndLocation {
-            uuid: self.id,
-            location: self.location.clone(),
-        }));
-        match serde_json::to_string(&register_message) {
-            // TODO: Loop and don´t progress unless ACK is received. Otherwise, panic?
-            Ok(string_message) => remote_sender.send(TungsteniteMessage::Text(string_message.into())).await?,
-            Err(_) => error!("Message {:?} to be relayed to Client {:?} could not be converted to String. Message was not sent.", register_message, self.id)
-        }
-        /// Notify internal services that all systems are go. Services will answer with Subscribe requests.
-        /// We should also process ACK, but that means refactoring the receiver. Will be done later.
-        self.audio_player
-            .send(InternalEventMessageClient::ConnectedToServer(
-                self.sender.clone(),
-            ))
-            .await?;
-
+    #[instrument(name = "Client::run", skip(self), fields(id=?self.id), level = "INFO")]
+    pub async fn run(&mut self) {
         loop {
-            tokio::select! {
-                // Receive messages from server via websocket connection
-                msg = remote_inbox.next() => {
-                    info!(?msg, "New message from server via websocket");
-                    // TODO: if 3 UnregisteredSubscriber messages are received, terminate the connection.
-                    if let Err(error) = self.handle_ws_message(msg, &mut remote_sender).await {
-                        // Some errors must stop the loop, others just inform.
-                        match error {
-                            ServerHandlerError::ParseError(parse_error)=>(),
-                            ServerHandlerError::Error(error)=>(),
-                            ServerHandlerError::ServerConnectionLost=>(),
-                            ServerHandlerError::UnrecognizableMessage(_)=>(),
-                            ServerHandlerError::InvalidExchangeMessage(_)=>(),
-                            ServerHandlerError::SendInternalMessage(send_error)=>(),
-                            ServerHandlerError::FailureDecodingBinaryExchangeMessage(_) =>(),
-                        }
-                    }
-                }
-                // Receive messages from any other actors
-                msg = self.inbox.recv() => {
-                    info!(?msg, "Sending message to server via websocket");
-                    if let Some(message) = msg {
-                        /// Services don't have the ID client data and neither shoud have it.
-                        /// The Server Handler will create the ExchangeMessage frames adding over the Actor internal request.
-                        /// Perhaps this API could be streamlined more...
-                        match message {
-                            InternalEventMessageClient::SubscribeToService(service) => {
-                                let exchange_message = ExchangeMessage::Request(Event::SuscribeToService(service, ClientIdAndLocation::new(self.id, self.location.clone())));
-                                match serde_json::to_string(&exchange_message) {
-                                    Ok(string_message) => remote_sender.send(TungsteniteMessage::Text(string_message.into())).await?,
-                                    Err(_) => error!("Message {:?} to be relayed to Client {:?} could not be converted to String. Message was not sent.", exchange_message, self.id)
+            let websocket_handshake_result = connect_async(&self.server_address).await;
+            match websocket_handshake_result {
+                Ok((ws_stream, _)) => {
+                    info!(
+                        "WebSocket handshake with {} has been completed successfully",
+                        self.server_address.to_string()
+                    );
+                    let (mut remote_sender, mut remote_inbox) = ws_stream.split();
+
+                    // We add to the queue the request to Register to the Server.
+                    let register_message = ExchangeMessage::Request(Event::Register(ClientIdAndLocation {
+                        uuid: self.id,
+                        location: self.location.clone(),
+                    }));
+                    self.send_message_to_lamarrs_server(&mut remote_sender, register_message).await;
+                    // By now, we notify internal services that WS is go and all the services will answer
+                    // with Subscribe requests. ALL of them.
+                    // In th future we will be able to select the services to run on the client from a CLI.
+                    // https://github.com/mgonzalezperna/lamarrs/issues/96
+                    // We should also process the server ACKs.
+                    self.playback_service
+                        .send(InternalEventMessageClient::ConnectedToServer(
+                            self.sender.clone(),
+                        ))
+                        .await;
+                    self.midi_service
+                        .send(InternalEventMessageClient::ConnectedToServer(
+                            self.sender.clone(),
+                        ))
+                        .await;
+                    loop {
+                        tokio::select! {
+                            // Receive messages from server via websocket connection
+                            msg = remote_inbox.next() => {
+                                info!(?msg, "New message from server via websocket");
+                                if let Err(error) = self.handle_ws_message(msg, &mut remote_sender).await {
+                                    match error {
+                                        ServerHandlerError::UnrecognizableMessage(_) |
+                                        ServerHandlerError::SendInternalMessage(_) |
+                                        ServerHandlerError::InvalidExchangeMessage(_) |
+                                        ServerHandlerError::SerializationError(_) => (),
+                                        ServerHandlerError::ParseError(_) |
+                                        ServerHandlerError::Error(_) |
+                                        ServerHandlerError::ServerConnectionLost |
+                                        ServerHandlerError::FailureDecodingBinaryExchangeMessage(_) => {
+                                            error!("Fatal error! Restarting the WebSocket connection.");
+                                            break;
+                                        }
+                                    }
                                 }
                             }
-                            _ => { error!("Invalid message type received from internal actor.") }
+                            // Receive messages from any other actors
+                            msg = self.inbox.recv() => {
+                                info!(?msg, "Sending message to server via websocket");
+                                if let Some(message) = msg {
+                                    match message {
+                                        InternalEventMessageClient::SubscribeToService(service) => {
+                                            let subcription_message = ExchangeMessage::Request(Event::SuscribeToService(service, ClientIdAndLocation::new(self.id, self.location.clone())));
+                                            self.send_message_to_lamarrs_server(&mut remote_sender, subcription_message).await;
+                                        }
+                                        _ => { error!("Invalid message type received from internal actor.") }
+                                    }
+                                } 
+                            }
                         }
                     }
                 }
+                Err(_) => {
+                    warn!("WebSocket connection failed, retrying in 3s...");
+                    sleep(Duration::from_secs(3)).await; // Implement some sort of backoff mechanism.
+                }
             }
-        }
+        } 
+    }
+
+    async fn send_message_to_lamarrs_server(
+        &self,
+        sender: &mut SplitSink<TungsteniteWebSocketStream<MaybeTlsStream<TcpStream>>, TungsteniteMessage>,
+        message: ExchangeMessage)
+    -> Result<(), ServerHandlerError> {
+        let message_serialised = serde_json::to_string(&message)?;
+        // TODO: Loop and don´t progress unless ACK is received. Otherwise, panic?
+        Ok(sender.send(TungsteniteMessage::Text(message_serialised.into())).await?)
     }
 
     /// Function that "peels" the outer layer of the webscoket frame.
@@ -212,15 +234,22 @@ impl Client {
     ) -> Result<(), ServerHandlerError> {
         match serde_json::from_str(&exchange_message) {
             Ok(ExchangeMessage::Scene(Event::PerformAction(action))) => match action {
-                Action::ShowNewSubtitles(subtitles) => todo!(),
-                Action::ChangeColour(colour_rgb) => todo!(),
+                Action::ShowNewSubtitles(subtitles) => {
+                    error!("NOT IMPLEMENTED!!!");
+                    Ok(())
+                }
+                Action::ChangeColour(colour_rgb) => {
+                    error!("NOT IMPLEMENTED!!!");
+                    Ok(())
+                }
                 Action::PlayAudio(audio_file) => Ok(self
-                    .audio_player
+                    .playback_service
                     .send(InternalEventMessageClient::PlayAudio(
                         audio_file,
                         self.sender.clone(),
                     ))
                     .await?),
+                Action::Midi(midi_instruction) => Ok(self.midi_service.send(InternalEventMessageClient::NewMIDIMessage(midi_instruction, self.sender.clone())).await?),
             },
             Ok(ExchangeMessage::Request(_)) => {
                 warn!(?exchange_message, "Requested Action by Server is not supported. Server may be sending Client Actions?");

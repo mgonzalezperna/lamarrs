@@ -6,7 +6,7 @@ use std::{
 
 use lamarrs_utils::{AudioFile, Service};
 use rodio::StreamError;
-use tokio::sync::mpsc::{self, channel, Receiver, Sender};
+use tokio::{sync::mpsc::{self, Receiver, Sender, channel}, task::{self, JoinError}};
 use tracing::info;
 
 use crate::InternalEventMessageClient;
@@ -23,6 +23,8 @@ pub enum PlaybackServiceError {
     FailedOpeningTargetAudioFile(#[from] io::Error),
     #[error("Target audio file can't be decoded. Format may not be supported.")]
     FailedPlayingTargetAudioFile(#[from] rodio::decoder::DecoderError),
+    #[error("The audio file player failed after reproduction started.")]
+    ErrorDuringAudioReproduction(#[from] JoinError),
 }
 
 #[derive(Debug)]
@@ -105,12 +107,14 @@ impl PlaybackService {
         );
         let stream_handle = rodio::OutputStreamBuilder::open_default_stream()?;
         let sink = rodio::Sink::connect_new(stream_handle.mixer());
-
-        info!("Playing {:?}", audio_file_path);
-        let file = std::fs::File::open(audio_file_path)?;
-        /// Send here ACK to Client
-        sink.append(rodio::Decoder::try_from(file)?);
-        sink.sleep_until_end();
-        Ok(())
+        let playing_audio_task= task::spawn_blocking(move || -> Result<(), PlaybackServiceError> {
+            info!("Playing {:?}", audio_file_path);
+            let file = std::fs::File::open(audio_file_path).map_err( PlaybackServiceError::FailedOpeningTargetAudioFile)?;
+            /// Send here ACK to Client?
+            sink.append(rodio::Decoder::try_from(file).map_err(PlaybackServiceError::FailedPlayingTargetAudioFile)?);
+            sink.sleep_until_end();
+            Ok(())
+        });
+        playing_audio_task.await?
     }
 }

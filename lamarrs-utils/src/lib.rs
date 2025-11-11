@@ -6,7 +6,7 @@ pub mod exchange_messages;
 pub mod orchestration_messages;
 // pub mod midi_event;  I don´t know if this lib is no_std and I don´t need MIDI it right now.
 
-use core::fmt;
+use core::{fmt, num::NonZeroU16};
 use heapless::String;
 use serde::{ser::SerializeStruct, Deserialize, Deserializer, Serialize, Serializer};
 use strum::{Display, EnumIter};
@@ -48,6 +48,7 @@ pub enum Service {
     Subtitle,
     Colour,
     AudioPlayer,
+    Midi,
 }
 
 /// Payload for colour change requests. TODO: allow other formats, or impl `to_hex()`, something like that.
@@ -190,4 +191,14 @@ impl<'de> Deserialize<'de> for ErrorDescription {
 
         Ok(ErrorDescription { error_descr })
     }
+}
+
+/* ################################################################################################*/
+
+/// MidiInstructions supported for MIDI requests.
+/// WIP
+/// Also, serde_yml nor serde_yaml support nested enums, so don't make this an enum or add a custom Deserializer in the future.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MidiInstruction {
+    pub new_preset: NonZeroU16
 }

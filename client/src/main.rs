@@ -2,7 +2,7 @@ mod server_handler;
 mod services;
 
 use clap::{Parser, ValueEnum};
-use color_eyre::eyre::{eyre, Result};
+use color_eyre::eyre::{Context, Result, eyre, WrapErr};
 use http::Uri;
 use std::path::PathBuf;
 use tracing::{debug, info};
@@ -12,9 +12,9 @@ use tracing_subscriber::{
 
 use crate::{
     server_handler::{Client, ServerHandlerError},
-    services::playback_service::{PlaybackService, PlaybackServiceError},
+    services::{midi::MidiService, playback::{PlaybackService, PlaybackServiceError}},
 };
-use lamarrs_utils::{AudioFile, ColourRgb, Service as ServerService};
+use lamarrs_utils::{AudioFile, ColourRgb, MidiInstruction, Service as ServerService};
 use tokio::sync::mpsc::Sender;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -32,6 +32,7 @@ pub enum InternalEventMessageClient {
     SubscribeToService(ServerService),
     PlayAudio(AudioFile, Sender<InternalEventMessageClient>),
     ShowSubtitles(String, Sender<InternalEventMessageClient>),
+    NewMIDIMessage(MidiInstruction, Sender<InternalEventMessageClient>),
     NewDmxColour(ColourRgb, Sender<InternalEventMessageClient>),
     NewLedColour(ColourRgb, Sender<InternalEventMessageClient>),
     Config(serde_json::Value), // Joker kind, must dissapear in the future.
@@ -86,6 +87,8 @@ pub struct Args {
     /// the Client Services that executes files.
     #[arg(long)]
     pub media_path: PathBuf,
+    #[arg(long)]
+    pub output_midi_port_name: String,
 }
 
 #[tokio::main]
@@ -102,6 +105,8 @@ async fn main() -> Result<()> {
     // pipelines to send and receive messages to each Actor.
     debug!("Creating Playback Service");
     let mut playback_service = PlaybackService::new(args.media_path);
+    debug!("Creating MIDI Service");
+    let mut midi_service = MidiService::try_new(args.output_midi_port_name, None).wrap_err("Failed to create Midi Service.")?;
 
     let server_address = Uri::builder()
         .scheme("ws")
@@ -114,11 +119,15 @@ async fn main() -> Result<()> {
         None, // We are not supporting location for this iteration of the Client.
         server_address,
         playback_service.sender.clone(),
+        midi_service.sender.clone(),
         // subtitle_service.sender.clone(),
         // colour_service.sender.clone(),
     );
     tokio::select! {
         result = playback_service.run() => {
+            Err(eyre!("Playback service crashed: {:?}", result))?
+        }
+        result = midi_service.run() => {
             Err(eyre!("Playback service crashed: {:?}", result))?
         }
         result = client_builder.run() => {
